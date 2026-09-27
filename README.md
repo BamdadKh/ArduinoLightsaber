@@ -32,7 +32,7 @@ hardware/
   kicad/                      KiCad 8 project (schematic + PCB)
   fabrication/                Gerber zip exactly as ordered (V3)
   exports/                    Schematic PDF/SVG, PCB front/back SVG
-  3d/                         Fusion 360 hilt assembly (.f3z) + PCB STEP model
+  3d/                         Fusion 360 hilt assembly (.f3z), printable tube (.stl), PCB STEP
 docs/
   hardware.md                 BOM, as-built pin map, known board issues
   images/                     Diagrams and README images
@@ -67,6 +67,9 @@ The hilt is modelled in Fusion 360 as a full assembly with the PCB and every mod
 
 Besides the PCB, the model holds the 18650 battery holder, TP4056 USB-C charger, XL6009 boost
 converter, PAM8403 amp, flat speaker, two tactile buttons and the OLED. See
+**[View the hilt tube in 3D](hardware/3d/hilt-tube.stl)** (GitHub shows STL files in an interactive viewer).
+The same file is ready to slice for printing.
+
 [docs/hardware.md](docs/hardware.md#hilt--3d-model) for details.
 
 > The schematic has known mistakes. The V3 board was built from it and the firmware works

@@ -4,10 +4,10 @@
 *.webm filter=lfs diff=lfs merge=lfs -text
 *.mkv filter=lfs diff=lfs merge=lfs -text
 
-# Binary CAD archives and meshes (each revision is a whole new blob)
+# Binary CAD archives (each revision is a whole new blob).
+# STL stays out of LFS so GitHub's 3D viewer can show it.
 *.f3z filter=lfs diff=lfs merge=lfs -text
 *.f3d filter=lfs diff=lfs merge=lfs -text
-*.stl filter=lfs diff=lfs merge=lfs -text
 *.3mf filter=lfs diff=lfs merge=lfs -text
 
 # KiCad files are text; keep LF so diffs stay clean
