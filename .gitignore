@@ -1,0 +1,26 @@
+# KiCad
+*-backups/
+_autosave-*
+*.kicad_prl
+fp-info-cache
+*.bak
+*.lck
+~*.lck
+\#auto_saved_files#
+
+# Arduino / build output
+build/
+*.hex
+*.elf
+
+# Claude Code (local only)
+CLAUDE.md
+CLAUDE.local.md
+.claude/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/

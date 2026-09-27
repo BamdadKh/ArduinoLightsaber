@@ -1,0 +1,11 @@
+# Large media goes through Git LFS (run `git lfs install` once per machine)
+*.mp4 filter=lfs diff=lfs merge=lfs -text
+*.mov filter=lfs diff=lfs merge=lfs -text
+*.webm filter=lfs diff=lfs merge=lfs -text
+*.mkv filter=lfs diff=lfs merge=lfs -text
+
+# KiCad files are text; keep LF so diffs stay clean
+*.kicad_pro text eol=lf
+*.kicad_sch text eol=lf
+*.kicad_pcb text eol=lf
+*.ino text eol=lf
