@@ -72,6 +72,31 @@ Board issues:
 - `fp-lib-table` points to a `DFR0299.pretty` in the author's Downloads folder, which no longer exists.
   The board still opens because its footprints are stored inside the `.kicad_pcb`.
 
+## Hilt / 3D model
+
+| File | What it is |
+|------|------------|
+| `hardware/3d/lightsaber-hilt.f3z` | Fusion 360 archive of the hilt assembly (editable source, Git LFS) |
+| `hardware/3d/lightsaber-pcb.step` | STEP of the assembled PCB, exported from KiCad |
+
+The hilt is a tube with a cut-away channel. The PCB sits in the upper section and the
+off-board modules stack below it. Components placed in the assembly:
+
+| Component | Role |
+|-----------|------|
+| Lightsaber PCB (V3) | Main board, see above |
+| 18650 battery holder | Single-cell Li-ion supply |
+| TP4056 charging module | USB-C charging for the 18650 |
+| DC-DC XL6009 | Boost from cell voltage to 5 V |
+| PAM8403 3 W amplifier | External amp fed from J7 (`DAC_R`) |
+| Flat speaker (35×25) | |
+| 2× tactile push button (B3F) | Main (J2) and aux (J4) buttons |
+| OLED 0.91" | Status display on J3 |
+| HC-06 Bluetooth module | Placeholder; Bluetooth is shelved and J3 is used by the OLED |
+
+To update the model, export a fresh `.f3z` from Fusion (**File → Export → Fusion Archive**) over
+the existing file. Use `.f3z` rather than `.f3d` so the linked component models come along.
+
 ## Regenerating exports
 
 KiCad 8 CLI (`C:\Program Files\KiCad\8.0\bin\kicad-cli.exe`):

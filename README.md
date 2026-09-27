@@ -32,7 +32,7 @@ hardware/
   kicad/                      KiCad 8 project (schematic + PCB)
   fabrication/                Gerber zip exactly as ordered (V3)
   exports/                    Schematic PDF/SVG, PCB front/back SVG
-  3d/                         STEP model of the assembled PCB
+  3d/                         Fusion 360 hilt assembly (.f3z) + PCB STEP model
 docs/
   hardware.md                 BOM, as-built pin map, known board issues
   images/                     Diagrams and README images
@@ -56,6 +56,18 @@ The schematic is in [hardware/exports/lightsaber-schematic.pdf](hardware/exports
 | PCB front | PCB back |
 |---|---|
 | ![front](hardware/exports/lightsaber-pcb-front.svg) | ![back](hardware/exports/lightsaber-pcb-back.svg) |
+
+### Hilt
+
+The hilt is modelled in Fusion 360 as a full assembly with the PCB and every module in place:
+[hardware/3d/lightsaber-hilt.f3z](hardware/3d/lightsaber-hilt.f3z). Open it in Fusion with
+**File → Open → Open from my computer**. The linked component models are bundled in the archive.
+
+<img src="docs/images/hilt-assembly.png" alt="Hilt assembly in Fusion 360" width="320">
+
+Besides the PCB, the model holds the 18650 battery holder, TP4056 USB-C charger, XL6009 boost
+converter, PAM8403 amp, flat speaker, two tactile buttons and the OLED. See
+[docs/hardware.md](docs/hardware.md#hilt--3d-model) for details.
 
 > The schematic has known mistakes. The V3 board was built from it and the firmware works
 > around them, so treat the board and firmware as the real reference.
