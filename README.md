@@ -12,6 +12,7 @@ and one-button control.
 - Hum while the blade is lit
 - Swing detection that plays a swing sound
 - 7 blade colours (blue, green, red, purple, cyan, orange, white)
+- OLED status display showing the current state and blade colour
 - Auto power-down after 1 minute without motion. Moving the hilt wakes it again.
 
 ## Controls
@@ -49,6 +50,7 @@ media/
 | Sound | DFPlayer Mini → external amp + speaker |
 | Blade | WS2812B, 144 LEDs, data on D6 |
 | Input | Momentary button on D2 |
+| Display | 0.91" SSD1306 128×32 OLED (mounted along the hilt), software I²C on D8 (SDA) / D9 (SCL) |
 
 The full BOM, pin map and known PCB issues are in **[docs/hardware.md](docs/hardware.md)**.
 The schematic is in [hardware/exports/lightsaber-schematic.pdf](hardware/exports/lightsaber-schematic.pdf).
@@ -65,11 +67,11 @@ The hilt is modelled in Fusion 360 as a full assembly with the PCB and every mod
 
 <img src="docs/images/hilt-assembly.png" alt="Hilt assembly in Fusion 360" width="320">
 
-Besides the PCB, the model holds the 18650 battery holder, TP4056 USB-C charger, XL6009 boost
-converter, PAM8403 amp, flat speaker, two tactile buttons and the OLED. See
 **[View the hilt tube in 3D](hardware/3d/hilt-tube.stl)** (GitHub shows STL files in an interactive viewer).
 The same file is ready to slice for printing.
 
+Besides the PCB, the model holds the 18650 battery holder, TP4056 USB-C charger, XL6009 boost
+converter, PAM8403 amp, flat speaker, two tactile buttons and the OLED. See
 [docs/hardware.md](docs/hardware.md#hilt--3d-model) for details.
 
 > The schematic has known mistakes. The V3 board was built from it and the firmware works
@@ -79,10 +81,10 @@ The same file is ready to slice for printing.
 
 ### Build & flash
 
-Libraries: **FastLED** (3.10.x), **OneButton** (2.6.x), **DFRobotDFPlayerMini** (1.0.6).
+Libraries: **FastLED** (3.10.x), **OneButton** (2.6.x), **DFRobotDFPlayerMini** (1.0.6), **U8g2** (2.36.x).
 
 ```bash
-arduino-cli lib install FastLED OneButton DFRobotDFPlayerMini
+arduino-cli lib install FastLED OneButton DFRobotDFPlayerMini U8g2
 arduino-cli compile -b arduino:avr:nano firmware/lightsaber
 arduino-cli upload -b arduino:avr:nano -p COM3 firmware/lightsaber
 ```
@@ -105,8 +107,7 @@ Copy the four sound files to a FAT32 micro-SD as described in
 | `SWING` | lit | swing | motion settles → `BLADE_ON`; click → `BLADE_OFF` |
 | `FULL_OFF` | off | none | motion → `BLADE_OFF`; click → `BLADE_ON` |
 
-Long press goes to `FULL_OFF` from any state. The diagram shows an OLED, which isn't
-implemented in the firmware yet.
+Long press goes to `FULL_OFF` from any state. The OLED is on in every state except `FULL_OFF`.
 
 ## Status
 

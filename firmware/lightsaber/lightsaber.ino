@@ -11,6 +11,7 @@
   - DFPlayer Mini on Software Serial (D10 = TX, D11 = RX)
   - Power button on D2 (OneButton)
   - WS2812B on D6
+  - OLED (0.91" SSD1306 128x32, mounted along the hilt) on software I2C: SDA = D8 (white), SCL = D9 (yellow)
 */
 
 #include <Wire.h>
@@ -18,6 +19,11 @@
 #include <DFRobotDFPlayerMini.h>
 #include <OneButton.h>
 #include <FastLED.h>
+#include <U8x8lib.h>
+
+#define PIN_OLED_SDA 8 // PB0; the OLED driver writes the port directly, so these can't change alone
+#define PIN_OLED_SCL 9
+#define OLED_FLIP 0 // set to 1 if the text is upside down in the hilt
 
 #define PIN_BTN_POWER 2
 #define PIN_DFPLAYER_TX 11  // Arduino TX -> DFPlayer RX
@@ -68,13 +74,13 @@ struct AccelData {
   float mag = 0;
 };
 
-const char* getStateName(LightsaberState state) {
+const __FlashStringHelper* getStateName(LightsaberState state) {
   switch (state) {
-    case STATE_FULL_OFF: return "FULL_OFF";
-    case STATE_BLADE_OFF: return "BLADE_OFF";
-    case STATE_BLADE_ON: return "BLADE_ON";
-    case STATE_SWING: return "SWING";
-    default: return "UNKNOWN";
+    case STATE_FULL_OFF: return F("FULL_OFF");
+    case STATE_BLADE_OFF: return F("BLADE_OFF");
+    case STATE_BLADE_ON: return F("BLADE_ON");
+    case STATE_SWING: return F("SWING");
+    default: return F("UNKNOWN");
   }
 }
 
@@ -101,6 +107,14 @@ CRGB colorPalette[] = {
   CRGB::White
 };
 const uint8_t COLOR_COUNT = sizeof(colorPalette) / sizeof(colorPalette[0]);
+const char COLOR_NAMES[][7] PROGMEM = {
+  "Blue", "Green", "Red", "Purple", "Cyan", "Orange", "White"
+};
+
+// OLED: text-only U8x8 driver (no framebuffer, saves ~1 KB RAM)
+// 128x32 = 16 columns x 4 rows of 8x8 text, read along the hilt.
+// Uses the custom fast I2C driver below (see oledI2cByte), set up in oledInit().
+U8X8 oled;
 
 uint8_t bladeLength = NUM_LEDS; // full length when blade on
 uint8_t currentLit = 0; // number of lit LEDs (for animation)
@@ -149,6 +163,10 @@ void igniteAnimation(unsigned long durationMs = 700);
 void extinguishAnimation(unsigned long durationMs = 600);
 void setBladeColor(const CRGB &c);
 void bladeClear();
+
+void oledInit();
+void oledUpdate();
+void oledTick();
 
 //////////////////////
 // DFPlayer helpers //
@@ -358,6 +376,115 @@ void initializeMPU() {
 }
 
 //////////////////////
+// OLED             //
+//////////////////////
+
+// U8x8's built-in software I2C uses digitalWrite and takes ~10 ms per character.
+// This bit-bangs D8/D9 with direct port writes instead (~0.65 ms per character).
+// Pins are open-drain: released = input with pull-up, low = driven low.
+#define OLED_SDA_BIT _BV(0) // D8 = PB0
+#define OLED_SCL_BIT _BV(1) // D9 = PB1
+static inline void oledSdaLow()  { PORTB &= ~OLED_SDA_BIT; DDRB |= OLED_SDA_BIT; }
+static inline void oledSdaHigh() { DDRB &= ~OLED_SDA_BIT; PORTB |= OLED_SDA_BIT; }
+static inline void oledSclLow()  { PORTB &= ~OLED_SCL_BIT; DDRB |= OLED_SCL_BIT; }
+static inline void oledSclHigh() { DDRB &= ~OLED_SCL_BIT; PORTB |= OLED_SCL_BIT; }
+
+static void oledI2cWrite(uint8_t b) {
+  for (uint8_t mask = 0x80; mask; mask >>= 1) {
+    if (b & mask) oledSdaHigh(); else oledSdaLow();
+    delayMicroseconds(1);
+    oledSclHigh();
+    delayMicroseconds(1);
+    oledSclLow();
+  }
+  // ACK clock; the display's ACK is not checked
+  oledSdaHigh();
+  delayMicroseconds(1);
+  oledSclHigh();
+  delayMicroseconds(1);
+  oledSclLow();
+}
+
+uint8_t oledI2cByte(u8x8_t*, uint8_t msg, uint8_t argInt, void* argPtr) {
+  switch (msg) {
+    case U8X8_MSG_BYTE_INIT:
+      oledSdaHigh();
+      oledSclHigh();
+      break;
+    case U8X8_MSG_BYTE_START_TRANSFER:
+      oledSdaLow();
+      delayMicroseconds(1);
+      oledSclLow();
+      oledI2cWrite(0x3C << 1); // SSD1306 address, write
+      break;
+    case U8X8_MSG_BYTE_SEND:
+      for (uint8_t* data = (uint8_t*)argPtr; argInt--; ) oledI2cWrite(*data++);
+      break;
+    case U8X8_MSG_BYTE_END_TRANSFER:
+      oledSdaLow();
+      delayMicroseconds(1);
+      oledSclHigh();
+      delayMicroseconds(1);
+      oledSdaHigh();
+      break;
+  }
+  return 1;
+}
+
+uint8_t oledGpioDelay(u8x8_t*, uint8_t msg, uint8_t argInt, void*) {
+  if (msg == U8X8_MSG_DELAY_MILLI) delay(argInt);
+  return 1;
+}
+
+void oledInit() {
+  u8x8_Setup(oled.getU8x8(), u8x8_d_ssd1306_128x32_univision, u8x8_cad_ssd13xx_fast_i2c,
+             oledI2cByte, oledGpioDelay);
+  oled.begin();
+  oled.setFlipMode(OLED_FLIP);
+  oled.setFont(u8x8_font_chroma48medium8_r);
+  oled.clear();
+  oled.drawString(3, 0, "LIGHTSABER");
+}
+
+// I2C writes block, so a full redraw (~27 ms) would stall the button and IMU.
+// oledUpdate() only schedules a redraw, and oledTick() draws one character per loop() pass.
+const uint8_t OLED_COLS = 16;
+const uint8_t OLED_IDLE = 2 * OLED_COLS; // nothing left to draw
+uint8_t oledPos = OLED_IDLE; // next character: 0-15 = state row, 16-31 = color row
+
+void oledUpdate() {
+  if (currentState == STATE_FULL_OFF) {
+    oled.setPowerSave(1);
+    oledPos = OLED_IDLE;
+    return;
+  }
+  oled.setPowerSave(0);
+  oledPos = 0;
+}
+
+// Character at position pos of "State: <state>" / "Color: <color>", space-padded.
+char oledCharAt(uint8_t pos) {
+  const char* label = PSTR("State: ");
+  const char* value = (const char*)getStateName(currentState);
+  if (pos >= OLED_COLS) {
+    pos -= OLED_COLS;
+    label = PSTR("Color: ");
+    value = COLOR_NAMES[colorIndex];
+  }
+  uint8_t len = strlen_P(label);
+  if (pos < len) return pgm_read_byte(label + pos);
+  pos -= len;
+  if (pos < strlen_P(value)) return pgm_read_byte(value + pos);
+  return ' ';
+}
+
+void oledTick() {
+  if (oledPos >= OLED_IDLE) return;
+  oled.drawGlyph(oledPos % OLED_COLS, 2 + oledPos / OLED_COLS, oledCharAt(oledPos));
+  oledPos++;
+}
+
+//////////////////////
 // Blade animations //
 //////////////////////
 
@@ -375,6 +502,14 @@ void setBladeColor(const CRGB &c) {
 }
 
 // Very simple ignite: light LEDs one-by-one from currentLit -> bladeLength-1
+// Like delay(), but draws pending OLED characters while waiting, so the display
+// updates during the blocking animations instead of after them.
+void animationDelay(unsigned long ms) {
+  unsigned long start = micros();
+  oledTick();
+  while (micros() - start < ms * 1000UL) {}
+}
+
 void igniteAnimation(unsigned long durationMs) {
   uint8_t startLit = currentLit;
   uint8_t endLit = bladeLength;
@@ -384,7 +519,7 @@ void igniteAnimation(unsigned long durationMs) {
   for (uint8_t i = startLit; i < endLit; ++i) {
     leds[i] = colorPalette[colorIndex];
     FastLED.show();
-    if (perLedDelay) delay(perLedDelay);
+    if (perLedDelay) animationDelay(perLedDelay);
     currentLit = i + 1;
   }
   currentLit = endLit;
@@ -398,7 +533,7 @@ void extinguishAnimation(unsigned long durationMs) {
   for (int i = (int)startLit - 1; i >= 0; --i) {
     leds[i] = CRGB::Black;
     FastLED.show();
-    if (perLedDelay) delay(perLedDelay);
+    if (perLedDelay) animationDelay(perLedDelay);
     currentLit = i;
   }
   currentLit = 0;
@@ -434,6 +569,7 @@ void handleButtonDoubleClick() {
   if (currentLit > 0) {
     setBladeColor(colorPalette[colorIndex]);
   }
+  oledUpdate();
 }
 
 void handleStateFullOff(unsigned long now) {
@@ -507,6 +643,7 @@ void transitionToFullOff() {
   Serial.print(getStateName(currentState));
   Serial.println(F(" to FULL_OFF"));
   currentState = STATE_FULL_OFF;
+  oledUpdate();
   stopAllSounds();
   extinguishAnimation();
   bladeClear();
@@ -518,6 +655,7 @@ void transitionToBladeOff() {
   Serial.println(F(" to BLADE_OFF"));
   LightsaberState lastState = currentState;
   currentState = STATE_BLADE_OFF;
+  oledUpdate();
   lastMoveTime = millis();
 
   // Play retract sound but DO NOT forcibly stop swing sound if it's currently playing.
@@ -533,6 +671,7 @@ void transitionToBladeOn(bool printMessage) {
   Serial.println(F(" to BLADE_ON"));
   LightsaberState prevState = currentState;
   currentState = STATE_BLADE_ON;
+  oledUpdate();
   lastMoveTime = millis();
   resetSwingDetection();
   bladeLength = NUM_LEDS;
@@ -560,6 +699,7 @@ void transitionToSwing(float delta, unsigned long now) {
   Serial.print(F(" to SWING (delta g): "));
   Serial.println(delta, 3);
   currentState = STATE_SWING;
+  oledUpdate();
   swingStartTime = now;
   lastSwingStartTime = now;
 
@@ -615,11 +755,13 @@ void setup() {
   FastLED.setBrightness(LED_BRIGHTNESS);
   bladeClear();
 
+  oledInit();
   dfInit();
   initializeMPU();
   calibrateBaseline();
 
   currentState = STATE_BLADE_OFF; // start in blade off
+  oledUpdate();
   lastMoveTime = millis();
   lastIMUTime = millis();
 
@@ -629,14 +771,12 @@ void setup() {
 void loop() {
   unsigned long now = millis();
   powerButton.tick(); // keep button responsive
+  oledTick();
 
-  if (currentState == STATE_BLADE_ON || currentState == STATE_SWING) {
-    if (now - lastIMUTime >= IMU_SAMPLE_MS) {
-      lastIMUTime = now;
-      updateStateMachine();
-    }
-  } else {
+  // Paced with millis() instead of delay() so the OLED keeps drawing while the blade is off.
+  bool lit = currentState == STATE_BLADE_ON || currentState == STATE_SWING;
+  if (now - lastIMUTime >= (lit ? IMU_SAMPLE_MS : 40UL)) {
+    lastIMUTime = now;
     updateStateMachine();
-    delay(40);
   }
 }

@@ -14,8 +14,8 @@
 | J1 | WS2812B strip, 144 LEDs | 3-pin header: GND / data / 5V |
 | J2 | Momentary push button (main) | To GND, internal pull-up |
 | J4 | Momentary push button (aux) | To GND — not used by firmware yet |
-| J5 | SSD1306 OLED (I²C, 4-pin) | Not used by firmware yet |
-| J3 | Bluetooth UART module (4-pin, e.g. HC-05/06) | Not used by firmware yet |
+| J3 | **SSD1306 OLED** (as built) | The schematic calls this header Bluetooth (D8/D9), but the OLED is wired here and runs on software I²C. SDA → D8 (white), SCL → D9 (yellow) |
+| J5 | Intended for the OLED (I²C on A4/A5) | Unused as built |
 | J7 | Speaker/amp header | DFPlayer `DAC_R` + 5V + GND → external amp |
 | J6 | 5V / GND power in | |
 | J8 | Battery sense | **Not routed on the PCB** — see known issues |
@@ -28,12 +28,12 @@
 | D2  | `d2`  | J2 main button | ✅ `PIN_BTN_POWER` |
 | D3  | `d3`  | J4 aux button | ❌ |
 | D6  | `d6`  | J1 WS2812B data | ✅ `LED_PIN` |
-| D8  | `d8`  | J3 BT pin 3 | ❌ |
-| D9  | `d9`  | J3 BT pin 4 | ❌ |
+| D8  | `d8`  | J3 → OLED SDA (white) | ✅ `PIN_OLED_SDA` (software I²C) |
+| D9  | `d9`  | J3 → OLED SCL (yellow) | ✅ `PIN_OLED_SCL` (software I²C) |
 | D10 | —     | DFPlayer TX | ✅ SoftwareSerial RX |
 | D11 | —     | DFPlayer RX | ✅ SoftwareSerial TX |
-| A4  | `sda` | MPU-6050 + OLED | ✅ I²C |
-| A5  | `scl` | MPU-6050 + OLED | ✅ I²C |
+| A4  | `sda` | MPU-6050 (+ J5, unused) | ✅ I²C |
+| A5  | `scl` | MPU-6050 (+ J5, unused) | ✅ I²C |
 | A7  | `a7`  | J8 battery (unrouted) | ❌ |
 | D7  | —     | *nothing* | ⚠️ firmware declares `PIN_DFPLAYER_BUSY 7`, but BUSY is not wired |
 
@@ -59,13 +59,13 @@ Board issues:
   **0.5 mm drills**, and J3 and J5 use 1.27 mm pitch with 0.65 mm drills. Only thin solid-core
   wire fits (roughly 24 AWG or smaller). That's a problem for J1 and J6, which carry the LED
   strip's power, since the strip can pull several amps.
-- **OLED and Bluetooth headers seem to be swapped on the physical build.** In the KiCad files,
-  copper and silkscreen agree: J3 (`5V G D8 D9`) is the BT UART and J5 (`G 5V SCL SDA`) is the
-  OLED on I²C. Needs confirming on the real board.
+- **The OLED is on D8/D9, not the hardware I²C bus.** It's wired to J3, the header the schematic
+  labels for Bluetooth, so it has to run on software I²C and can't share the MPU-6050's A4/A5 bus.
+  Wire it as OLED SDA → D8, SCL → D9. Go by the pin labels on the OLED, not the wire colours.
 - **The power system isn't in the schematic or PCB.** The board only has a `5V/G` input (J6) and a
   `bat+` pad (J8). The battery, charging, switch and 5V regulation all live off the board and
   aren't documented yet (TODO).
-- **Wired but unused by the firmware:** aux button (D3), Bluetooth header (D8/D9), OLED (I²C).
+- **Wired but unused by the firmware:** aux button (D3).
 - **No LED current limit in hardware.** 144 WS2812B LEDs at full white draw about 8.6 A.
   The firmware caps global brightness at 160/255 but doesn't set a FastLED power limit.
 - DRC on the PCB file reports 47 violations: 25 isolated copper, 7 clearance, 7 courtyard overlap, and minor silk issues.
