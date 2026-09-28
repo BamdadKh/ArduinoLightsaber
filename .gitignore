@@ -25,3 +25,7 @@ desktop.ini
 .vscode/
 .idea/
 firmware/tools/out/
+
+# Python
+__pycache__/
+*.pyc
