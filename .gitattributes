@@ -15,3 +15,9 @@
 *.kicad_sch text eol=lf
 *.kicad_pcb text eol=lf
 *.ino text eol=lf
+*.cpp text eol=lf
+*.h text eol=lf
+*.py text eol=lf
+
+# Sound font (small WAVs, kept out of LFS so a clone is ready to copy to SD)
+*.wav binary

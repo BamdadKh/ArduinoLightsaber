@@ -1,782 +1,133 @@
 /*
-  Lightsaber State Machine with Swing Detection, DFPlayer Mini Sound,
-  OneButton input, and WS2812B blade with *only* ignite/extinguish animations.
-  - Ignite: LEDs turn on one-by-one (simple)
-  - Extinguish: LEDs turn off one-by-one (simple)
-  - All other visual animations removed (no pulse, no flicker, no tip flash)
+  KYBER OS 2 - Arduino Nano lightsaber firmware
 
-  Hardware:
-  - Arduino Nano (AVR)
-  - MPU6050 on I2C (A4 = SDA, A5 = SCL)
-  - DFPlayer Mini on Software Serial (D10 = TX, D11 = RX)
-  - Power button on D2 (OneButton)
-  - WS2812B on D6
-  - OLED (0.91" SSD1306 128x32, mounted along the hilt) on software I2C: SDA = D8 (white), SCL = D9 (yellow)
+  Hardware (V3 PCB): Nano, MPU-6050 (A4/A5), DFPlayer Mini (D10/D11), 144 x WS2812B (D6),
+  main button D2, aux button D3, 128x32 SSD1306 on D8/D9 mounted portrait, battery on A7.
+
+  Module map
+    saber.cpp    modes, controls, gestures -> effects (the brain)
+    imu.cpp      MPU-6050: swing / clash / stab / twist / pitch
+    blade.cpp    LED styles, ignitions, effect overlays
+    ui.cpp       portrait OLED screens, streamed as scanlines (no framebuffer)
+    audio.cpp    DFPlayer: looping hum + advert overlays, TX-only bit-bang serial
+    buttons.cpp  two buttons: clicks, holds, chords
+    power.cpp    battery voltage against the internal bandgap
+    settings.cpp EEPROM settings, presets, lifetime stats
+
+  Every loop() pass does a slice of everything; nothing blocks for more than one
+  LED frame (~4.5 ms) or one DFPlayer command (~10 ms).
 */
+#include <avr/sleep.h>
+#include "config.h"
+#include "state.h"
+#include "settings.h"
+#include "twi.h"
+#include "imu.h"
+#include "audio.h"
+#include "blade.h"
+#include "buttons.h"
+#include "power.h"
+#include "ui.h"
+#include "saber.h"
 
-#include <Wire.h>
-#include <SoftwareSerial.h>
-#include <DFRobotDFPlayerMini.h>
-#include <OneButton.h>
-#include <FastLED.h>
-#include <U8x8lib.h>
-
-#define PIN_OLED_SDA 8 // PB0; the OLED driver writes the port directly, so these can't change alone
-#define PIN_OLED_SCL 9
-#define OLED_FLIP 0 // set to 1 if the text is upside down in the hilt
-
-#define PIN_BTN_POWER 2
-#define PIN_DFPLAYER_TX 11  // Arduino TX -> DFPlayer RX
-#define PIN_DFPLAYER_RX 10  // Arduino RX -> DFPlayer TX
-#define PIN_DFPLAYER_BUSY 7 // DFPlayer BUSY -> Arduino pin 7
-
-// WS2812B settings - change to your pin / LED count
-#define LED_PIN 6
-#define NUM_LEDS 144
-#define LED_BRIGHTNESS 160 // 0-255
-
-CRGB leds[NUM_LEDS];
-
-const uint8_t MPU_ADDR = 0x68;
-const uint8_t REG_PWR_MGMT_1 = 0x6B;
-const uint8_t REG_ACCEL_XOUT_H = 0x3B;
-
-enum SoundFile {
-  SOUND_HUM = 2,
-  SOUND_IGNITE = 1,
-  SOUND_SWING = 3,
-  SOUND_RETRACT = 4
-};
-
-const float ACCEL_SCALE = 16384.0f; // LSB/g for ±2g
-const unsigned long IMU_SAMPLE_MS = 10; // 100 Hz sampling
-
-const float SWING_START_DELTA_G = 0.60f;
-const float SWING_END_DELTA_G = 0.25f;
-const float MOVE_DETECT_DELTA_G = 0.05f;
-const unsigned long SWING_MIN_DURATION_MS = 100;
-const unsigned long SWING_COOLDOWN_MS = 1000;
-const uint8_t ACCEL_MOVAVG_WINDOW = 10;
-
-const unsigned long IDLE_TIMEOUT_MS = 60000; // 1 min no motion -> Full off
-
-enum LightsaberState {
-  STATE_FULL_OFF,
-  STATE_BLADE_OFF,
-  STATE_BLADE_ON,
-  STATE_SWING
-};
-
-struct AccelData {
-  float ax = 0;
-  float ay = 0;
-  float az = 0;
-  float mag = 0;
-};
-
-const __FlashStringHelper* getStateName(LightsaberState state) {
-  switch (state) {
-    case STATE_FULL_OFF: return F("FULL_OFF");
-    case STATE_BLADE_OFF: return F("BLADE_OFF");
-    case STATE_BLADE_ON: return F("BLADE_ON");
-    case STATE_SWING: return F("SWING");
-    default: return F("UNKNOWN");
+#if DEBUG_SERIAL
+// Telemetry to the USB serial port (115200 8N1) without HardwareSerial's ~1.7 KB:
+// a TX-only bit-bang on D1, one line every 250 ms:
+// L loops/s, M mode, S swing dps, R roll dps, P pitch deg, G shock x0.1 g, B battery mV
+#define DBG_BIT (F_CPU / 115200)
+static void dbgByte(uint8_t b) {
+  uint8_t sreg = SREG;
+  cli();
+  PORTD &= ~_BV(1);
+  __builtin_avr_delay_cycles(DBG_BIT - 4);
+  for (uint8_t i = 0; i < 8; i++) {
+    if (b & 1) PORTD |= _BV(1);
+    else PORTD &= ~_BV(1);
+    b >>= 1;
+    __builtin_avr_delay_cycles(DBG_BIT - 9);
   }
+  PORTD |= _BV(1);
+  __builtin_avr_delay_cycles(DBG_BIT);
+  SREG = sreg;
 }
-
-LightsaberState currentState = STATE_FULL_OFF;
-AccelData accelBaseline;
-AccelData accelBuffer[ACCEL_MOVAVG_WINDOW];
-uint8_t accelIdx = 0;
-
-unsigned long lastIMUTime = 0;
-unsigned long lastSwingTime = 0;
-unsigned long swingStartTime = 0;
-unsigned long lastSwingStartTime = 0;
-unsigned long lastMoveTime = 0;
-
-// LED / color state
-uint8_t colorIndex = 0;
-CRGB colorPalette[] = {
-  CRGB::Blue,
-  CRGB::Green,
-  CRGB::Red,
-  CRGB::Purple,
-  CRGB::Cyan,
-  CRGB::Orange,
-  CRGB::White
-};
-const uint8_t COLOR_COUNT = sizeof(colorPalette) / sizeof(colorPalette[0]);
-const char COLOR_NAMES[][7] PROGMEM = {
-  "Blue", "Green", "Red", "Purple", "Cyan", "Orange", "White"
-};
-
-// OLED: text-only U8x8 driver (no framebuffer, saves ~1 KB RAM)
-// 128x32 = 16 columns x 4 rows of 8x8 text, read along the hilt.
-// Uses the custom fast I2C driver below (see oledI2cByte), set up in oledInit().
-U8X8 oled;
-
-uint8_t bladeLength = NUM_LEDS; // full length when blade on
-uint8_t currentLit = 0; // number of lit LEDs (for animation)
-
-// DFPlayer + OneButton
-SoftwareSerial dfSerial(PIN_DFPLAYER_RX, PIN_DFPLAYER_TX);
-DFRobotDFPlayerMini dfPlayer;
-
-// OneButton instance: activeLow=true, enable internal pullup=true
-OneButton powerButton(PIN_BTN_POWER, true, true);
-
-// Sound state flags (to avoid cutting/restarting swing)
-bool isHumPlaying = false;
-bool isSwingPlaying = false;
-
-// Forward declarations
-void transitionToFullOff();
-void transitionToBladeOff();
-void transitionToBladeOn(bool printMessage = true);
-void transitionToSwing(float delta, unsigned long now);
-void handleButtonClick();
-void handleButtonLongPressStart();
-void handleButtonDoubleClick();
-
-void dfInit();
-void playIgniteSound();
-void playHumSound();
-void playSwingSound();
-void playRetractSound();
-void stopAllSounds();
-
-bool readMPUBytes(uint8_t devAddr, uint8_t regAddr, uint8_t length, uint8_t* buffer);
-bool readAccelData(AccelData& data);
-void updateMovingAverage(const AccelData& newData);
-AccelData getSmoothedAccel();
-float calculateDeltaFromBaseline(const AccelData& current);
-bool isSwingStartCondition(float delta, unsigned long now);
-bool isMoving(float delta, unsigned long now);
-bool isSwingEndCondition(float delta, unsigned long now);
-bool isIdleTimeout(unsigned long now);
-void resetSwingDetection();
-void calibrateBaseline();
-void initializeMPU();
-
-void igniteAnimation(unsigned long durationMs = 700);
-void extinguishAnimation(unsigned long durationMs = 600);
-void setBladeColor(const CRGB &c);
-void bladeClear();
-
-void oledInit();
-void oledUpdate();
-void oledTick();
-
-//////////////////////
-// DFPlayer helpers //
-//////////////////////
-
-void dfInit() {
-  dfSerial.begin(9600);
-  Serial.println(F("Initializing DFPlayer..."));
-  delay(1000); // Wait a bit for DFPlayer to start
-  
-  if (!dfPlayer.begin(dfSerial)) {
-    Serial.println(F("DFPlayer begin() failed!"));
-    Serial.println(F("1. Check wiring (TX/RX, 1K resistor on RX)"));
-    Serial.println(F("2. Check power supply"));
-    Serial.println(F("3. Check SD card is inserted"));
-    while(true) {
-      delay(1000); // Halt if DFPlayer fails
-    }
+static void dbgStr(const char* p) {
+  while (uint8_t c = pgm_read_byte(p++)) dbgByte(c);
+}
+static void dbgNum(const char* label, int16_t v) {
+  dbgStr(label);
+  if (v < 0) {
+    dbgByte('-');
+    v = -v;
   }
-  
-  Serial.println(F("DFPlayer begin() OK"));
-  delay(200);
-  
-  int fileCount = dfPlayer.readFileCounts();
-  Serial.print(F("Files on SD card: "));
-  Serial.println(fileCount);
-  
-  if (fileCount <= 0) {
-    Serial.println(F("ERROR: No files found on SD card!"));
-    while(true) {
-      delay(1000); // Halt if no files
-    }
-  }
-  
-  dfPlayer.volume(20); // Set default volume (0-30)
-  delay(200);
-  Serial.println(F("DFPlayer ready!"));
+  char b[6];
+  uint8_t n = 0;
+  do b[n++] = '0' + v % 10; while (v /= 10);
+  while (n) dbgByte(b[--n]);
+  dbgByte(' ');
 }
-
-void playIgniteSound() {
-  Serial.println(F("Playing ignite sound (track 1)"));
-  dfPlayer.play(SOUND_IGNITE);
-  isHumPlaying = false;
-  isSwingPlaying = false;
-  delay(50);
+static void debugPrint(uint32_t now) {
+  static uint32_t last;
+  static uint16_t loops;
+  loops++;
+  if (now - last < 250) return;
+  last = now;
+  dbgNum(PSTR("L="), loops * 4);
+  dbgNum(PSTR("M="), sys.mode);
+  dbgNum(PSTR("S="), motion.swingDps);
+  dbgNum(PSTR("R="), motion.rollDps);
+  dbgNum(PSTR("P="), motion.pitch);
+  dbgNum(PSTR("G="), motion.shock);
+  dbgNum(PSTR("B="), sys.battMv);
+  dbgByte(13); // CR LF
+  dbgByte(10);
+  loops = 0;
 }
-
-void playHumSound() {
-  Serial.println(F("Playing hum sound (track 2 loop)"));
-  dfPlayer.play(SOUND_HUM);
-  isHumPlaying = true;
-  isSwingPlaying = false;
-  delay(50);
-}
-
-void playSwingSound() {
-  Serial.println(F("Playing swing sound (track 3 - full)"));
-  dfPlayer.play(SOUND_SWING);
-  isSwingPlaying = true;
-  isHumPlaying = false;
-  delay(50);
-}
-
-void playRetractSound() {
-  Serial.println(F("Playing retract sound (track 4)"));
-  dfPlayer.play(SOUND_RETRACT);
-  isHumPlaying = false;
-  isSwingPlaying = false;
-  delay(50);
-}
-
-void stopAllSounds() {
-  Serial.println(F("Stopping all sounds"));
-  dfPlayer.stop();
-  isHumPlaying = false;
-  isSwingPlaying = false;
-  delay(50);
-}
-
-//////////////////////
-// MPU helpers //
-//////////////////////
-
-bool readMPUBytes(uint8_t devAddr, uint8_t regAddr, uint8_t length, uint8_t* buffer) {
-  Wire.beginTransmission(devAddr);
-  Wire.write(regAddr);
-  if (Wire.endTransmission(false) != 0) return false;
-  Wire.requestFrom((int)devAddr, (int)length);
-  uint8_t i = 0;
-  while (Wire.available() && i < length) buffer[i++] = Wire.read();
-  return (i == length);
-}
-
-bool readAccelData(AccelData& data) {
-  uint8_t buf[14];
-  if (!readMPUBytes(MPU_ADDR, REG_ACCEL_XOUT_H, 14, buf)) return false;
-  
-  auto s16 = [&](int idx) -> int16_t { 
-    return (int16_t)((buf[idx] << 8) | buf[idx + 1]); 
-  };
-  
-  data.ax = (float)s16(0) / ACCEL_SCALE;
-  data.ay = (float)s16(2) / ACCEL_SCALE;
-  data.az = (float)s16(4) / ACCEL_SCALE;
-  data.mag = sqrt(data.ax * data.ax + data.ay * data.ay + data.az * data.az);
-  
-  return true;
-}
-
-void updateMovingAverage(const AccelData& newData) {
-  accelBuffer[accelIdx] = newData;
-  accelIdx = (accelIdx + 1) % ACCEL_MOVAVG_WINDOW;
-}
-
-AccelData getSmoothedAccel() {
-  AccelData smoothed;
-  for (uint8_t i = 0; i < ACCEL_MOVAVG_WINDOW; ++i) {
-    smoothed.ax += accelBuffer[i].ax;
-    smoothed.ay += accelBuffer[i].ay;
-    smoothed.az += accelBuffer[i].az;
-  }
-  smoothed.ax /= ACCEL_MOVAVG_WINDOW;
-  smoothed.ay /= ACCEL_MOVAVG_WINDOW;
-  smoothed.az /= ACCEL_MOVAVG_WINDOW;
-  smoothed.mag = sqrt(smoothed.ax * smoothed.ax + 
-                      smoothed.ay * smoothed.ay + 
-                      smoothed.az * smoothed.az);
-  return smoothed;
-}
-
-float calculateDeltaFromBaseline(const AccelData& current) {
-  return fabs(current.mag - accelBaseline.mag);
-}
-
-bool isSwingStartCondition(float delta, unsigned long now) {
-  return delta >= SWING_START_DELTA_G && 
-         (now - lastSwingStartTime) > SWING_COOLDOWN_MS;
-}
-
-bool isMoving(float delta, unsigned long now) {
-  bool move = (delta >= MOVE_DETECT_DELTA_G);
-  if (move) {
-    lastMoveTime = now;
-  }
-  return move;
-}
-
-bool isSwingEndCondition(float delta, unsigned long now) {
-  unsigned long duration = now - swingStartTime;
-  return delta <= SWING_END_DELTA_G && duration >= SWING_MIN_DURATION_MS;
-}
-
-bool isIdleTimeout(unsigned long now) {
-  return (now - lastMoveTime) > IDLE_TIMEOUT_MS;
-}
-
-void resetSwingDetection() {
-  swingStartTime = 0;
-  for (uint8_t i = 0; i < ACCEL_MOVAVG_WINDOW; ++i) {
-    accelBuffer[i] = accelBaseline;
-  }
-  accelIdx = 0;
-}
-
-void calibrateBaseline() {
-  const int CAL_SAMPLES = 80;
-  AccelData sum;
-  sum.ax = 0;
-  sum.ay = 0;
-  sum.az = 0;
-  sum.mag = 0;
-  
-  Serial.println(F("Calibrating baseline... keep device still"));
-  
-  for (int i = 0; i < CAL_SAMPLES; ++i) {
-    AccelData sample;
-    if (readAccelData(sample)) {
-      sum.ax += sample.ax;
-      sum.ay += sample.ay;
-      sum.az += sample.az;
-      sum.mag += sample.mag;
-    }
-    delay(8);
-  }
-  
-  accelBaseline.ax = sum.ax / CAL_SAMPLES;
-  accelBaseline.ay = sum.ay / CAL_SAMPLES;
-  accelBaseline.az = sum.az / CAL_SAMPLES;
-  accelBaseline.mag = sum.mag / CAL_SAMPLES;
-  
-  Serial.print(F("Baseline calibrated (g): "));
-  Serial.println(accelBaseline.mag, 4);
-  
-  for (uint8_t i = 0; i < ACCEL_MOVAVG_WINDOW; ++i) {
-    accelBuffer[i] = accelBaseline;
-  }
-}
-
-void initializeMPU() {
-  Serial.println(F("Initializing MPU6050..."));
-  Wire.beginTransmission(MPU_ADDR);
-  Wire.write(REG_PWR_MGMT_1);
-  Wire.write(0x00); // Wake up MPU6050
-  Wire.endTransmission();
-  delay(50);
-  Serial.println(F("MPU6050 initialized"));
-}
-
-//////////////////////
-// OLED             //
-//////////////////////
-
-// U8x8's built-in software I2C uses digitalWrite and takes ~10 ms per character.
-// This bit-bangs D8/D9 with direct port writes instead (~0.65 ms per character).
-// Pins are open-drain: released = input with pull-up, low = driven low.
-#define OLED_SDA_BIT _BV(0) // D8 = PB0
-#define OLED_SCL_BIT _BV(1) // D9 = PB1
-static inline void oledSdaLow()  { PORTB &= ~OLED_SDA_BIT; DDRB |= OLED_SDA_BIT; }
-static inline void oledSdaHigh() { DDRB &= ~OLED_SDA_BIT; PORTB |= OLED_SDA_BIT; }
-static inline void oledSclLow()  { PORTB &= ~OLED_SCL_BIT; DDRB |= OLED_SCL_BIT; }
-static inline void oledSclHigh() { DDRB &= ~OLED_SCL_BIT; PORTB |= OLED_SCL_BIT; }
-
-static void oledI2cWrite(uint8_t b) {
-  for (uint8_t mask = 0x80; mask; mask >>= 1) {
-    if (b & mask) oledSdaHigh(); else oledSdaLow();
-    delayMicroseconds(1);
-    oledSclHigh();
-    delayMicroseconds(1);
-    oledSclLow();
-  }
-  // ACK clock; the display's ACK is not checked
-  oledSdaHigh();
-  delayMicroseconds(1);
-  oledSclHigh();
-  delayMicroseconds(1);
-  oledSclLow();
-}
-
-uint8_t oledI2cByte(u8x8_t*, uint8_t msg, uint8_t argInt, void* argPtr) {
-  switch (msg) {
-    case U8X8_MSG_BYTE_INIT:
-      oledSdaHigh();
-      oledSclHigh();
-      break;
-    case U8X8_MSG_BYTE_START_TRANSFER:
-      oledSdaLow();
-      delayMicroseconds(1);
-      oledSclLow();
-      oledI2cWrite(0x3C << 1); // SSD1306 address, write
-      break;
-    case U8X8_MSG_BYTE_SEND:
-      for (uint8_t* data = (uint8_t*)argPtr; argInt--; ) oledI2cWrite(*data++);
-      break;
-    case U8X8_MSG_BYTE_END_TRANSFER:
-      oledSdaLow();
-      delayMicroseconds(1);
-      oledSclHigh();
-      delayMicroseconds(1);
-      oledSdaHigh();
-      break;
-  }
-  return 1;
-}
-
-uint8_t oledGpioDelay(u8x8_t*, uint8_t msg, uint8_t argInt, void*) {
-  if (msg == U8X8_MSG_DELAY_MILLI) delay(argInt);
-  return 1;
-}
-
-void oledInit() {
-  u8x8_Setup(oled.getU8x8(), u8x8_d_ssd1306_128x32_univision, u8x8_cad_ssd13xx_fast_i2c,
-             oledI2cByte, oledGpioDelay);
-  oled.begin();
-  oled.setFlipMode(OLED_FLIP);
-  oled.setFont(u8x8_font_chroma48medium8_r);
-  oled.clear();
-  oled.drawString(3, 0, "LIGHTSABER");
-}
-
-// I2C writes block, so a full redraw (~27 ms) would stall the button and IMU.
-// oledUpdate() only schedules a redraw, and oledTick() draws one character per loop() pass.
-const uint8_t OLED_COLS = 16;
-const uint8_t OLED_IDLE = 2 * OLED_COLS; // nothing left to draw
-uint8_t oledPos = OLED_IDLE; // next character: 0-15 = state row, 16-31 = color row
-
-void oledUpdate() {
-  if (currentState == STATE_FULL_OFF) {
-    oled.setPowerSave(1);
-    oledPos = OLED_IDLE;
-    return;
-  }
-  oled.setPowerSave(0);
-  oledPos = 0;
-}
-
-// Character at position pos of "State: <state>" / "Color: <color>", space-padded.
-char oledCharAt(uint8_t pos) {
-  const char* label = PSTR("State: ");
-  const char* value = (const char*)getStateName(currentState);
-  if (pos >= OLED_COLS) {
-    pos -= OLED_COLS;
-    label = PSTR("Color: ");
-    value = COLOR_NAMES[colorIndex];
-  }
-  uint8_t len = strlen_P(label);
-  if (pos < len) return pgm_read_byte(label + pos);
-  pos -= len;
-  if (pos < strlen_P(value)) return pgm_read_byte(value + pos);
-  return ' ';
-}
-
-void oledTick() {
-  if (oledPos >= OLED_IDLE) return;
-  oled.drawGlyph(oledPos % OLED_COLS, 2 + oledPos / OLED_COLS, oledCharAt(oledPos));
-  oledPos++;
-}
-
-//////////////////////
-// Blade animations //
-//////////////////////
-
-void bladeClear() {
-  for (uint8_t i = 0; i < NUM_LEDS; ++i) leds[i] = CRGB::Black;
-  FastLED.show();
-}
-
-void setBladeColor(const CRGB &c) {
-  for (uint8_t i = 0; i < currentLit; ++i) {
-    leds[i] = c;
-  }
-  for (uint8_t i = currentLit; i < NUM_LEDS; ++i) leds[i] = CRGB::Black;
-  FastLED.show();
-}
-
-// Very simple ignite: light LEDs one-by-one from currentLit -> bladeLength-1
-// Like delay(), but draws pending OLED characters while waiting, so the display
-// updates during the blocking animations instead of after them.
-void animationDelay(unsigned long ms) {
-  unsigned long start = micros();
-  oledTick();
-  while (micros() - start < ms * 1000UL) {}
-}
-
-void igniteAnimation(unsigned long durationMs) {
-  uint8_t startLit = currentLit;
-  uint8_t endLit = bladeLength;
-  uint8_t steps = (endLit > startLit) ? (endLit - startLit) : 0;
-  unsigned long perLedDelay = (steps > 0) ? (durationMs / steps) : durationMs;
-
-  for (uint8_t i = startLit; i < endLit; ++i) {
-    leds[i] = colorPalette[colorIndex];
-    FastLED.show();
-    if (perLedDelay) animationDelay(perLedDelay);
-    currentLit = i + 1;
-  }
-  currentLit = endLit;
-}
-
-// Very simple extinguish: turn LEDs off one-by-one from currentLit-1 -> 0
-void extinguishAnimation(unsigned long durationMs) {
-  uint8_t startLit = (currentLit > 0) ? currentLit : bladeLength;
-  unsigned long perLedDelay = (startLit > 0) ? (durationMs / startLit) : durationMs;
-
-  for (int i = (int)startLit - 1; i >= 0; --i) {
-    leds[i] = CRGB::Black;
-    FastLED.show();
-    if (perLedDelay) animationDelay(perLedDelay);
-    currentLit = i;
-  }
-  currentLit = 0;
-  bladeClear();
-}
-
-//////////////////////
-// State machine    //
-//////////////////////
-
-void handleButtonClick() {
-  // single click = toggle blade (ignite if off, extinguish if on or swinging)
-  Serial.println(F("Button single-click (toggle blade)"));
-  if (currentState == STATE_BLADE_ON || currentState == STATE_SWING) {
-    // extinguish
-    transitionToBladeOff();
-  } else {
-    // ignite
-    transitionToBladeOn();
-  }
-}
-
-void handleButtonLongPressStart() {
-  Serial.println(F("Button long-press -> FULL_OFF"));
-  transitionToFullOff();
-}
-
-void handleButtonDoubleClick() {
-  // cycle color
-  colorIndex = (colorIndex + 1) % COLOR_COUNT;
-  Serial.print(F("Color changed to index "));
-  Serial.println(colorIndex);
-  if (currentLit > 0) {
-    setBladeColor(colorPalette[colorIndex]);
-  }
-  oledUpdate();
-}
-
-void handleStateFullOff(unsigned long now) {
-  AccelData rawAccel;
-  if (readAccelData(rawAccel)) {
-    updateMovingAverage(rawAccel);
-    AccelData smoothed = getSmoothedAccel();
-    float delta = calculateDeltaFromBaseline(smoothed);
-    if (isMoving(delta, now)) {
-      transitionToBladeOff();
-    }
-  }
-}
-
-void handleStateBladeOff(unsigned long now) {
-  AccelData rawAccel;
-  if (!readAccelData(rawAccel)) return;
-  updateMovingAverage(rawAccel);
-  AccelData smoothed = getSmoothedAccel();
-  float delta = calculateDeltaFromBaseline(smoothed);
-  if (isMoving(delta, now)) {
-    lastSwingTime = now;
-  }
-  if (isIdleTimeout(now)) {
-    transitionToFullOff();
-    return;
-  }
-}
-
-void handleStateBladeOn(unsigned long now) {
-  AccelData rawAccel;
-  if (!readAccelData(rawAccel)) return;
-  updateMovingAverage(rawAccel);
-  AccelData smoothed = getSmoothedAccel();
-  float delta = calculateDeltaFromBaseline(smoothed);
-  if (isMoving(delta, now)) {
-    lastSwingTime = now;
-  }
-  if (isSwingStartCondition(delta, now)) {
-    transitionToSwing(delta, now);
-    return;
-  }
-  // Ensure hum is playing (but only if not in swing)
-  if (!isHumPlaying && !isSwingPlaying) {
-    playHumSound();
-  }
-  // Keep blade steady color (no visual pulse)
-  if (currentLit > 0) setBladeColor(colorPalette[colorIndex]);
-  if (isIdleTimeout(now)) {
-    transitionToFullOff();
-  }
-}
-
-void handleStateSwing(unsigned long now) {
-  AccelData rawAccel;
-  if (!readAccelData(rawAccel)) return;
-  updateMovingAverage(rawAccel);
-  AccelData smoothed = getSmoothedAccel();
-  float delta = calculateDeltaFromBaseline(smoothed);
-
-  // No visual flare during swing (per request)
-
-  if (isSwingEndCondition(delta, now)) {
-    isSwingPlaying = false; // signal software that swing event ended
-    transitionToBladeOn();
-  }
-}
-
-void transitionToFullOff() {
-  Serial.print(F("Transitioning from "));
-  Serial.print(getStateName(currentState));
-  Serial.println(F(" to FULL_OFF"));
-  currentState = STATE_FULL_OFF;
-  oledUpdate();
-  stopAllSounds();
-  extinguishAnimation();
-  bladeClear();
-}
-
-void transitionToBladeOff() {
-  Serial.print(F("Transitioning from "));
-  Serial.print(getStateName(currentState));
-  Serial.println(F(" to BLADE_OFF"));
-  LightsaberState lastState = currentState;
-  currentState = STATE_BLADE_OFF;
-  oledUpdate();
-  lastMoveTime = millis();
-
-  // Play retract sound but DO NOT forcibly stop swing sound if it's currently playing.
-  playRetractSound();
-
-  // Visual extinguish (simple)
-  extinguishAnimation();
-}
-
-void transitionToBladeOn(bool printMessage) {
-  Serial.print(F("Transitioning from "));
-  Serial.print(getStateName(currentState));
-  Serial.println(F(" to BLADE_ON"));
-  LightsaberState prevState = currentState;
-  currentState = STATE_BLADE_ON;
-  oledUpdate();
-  lastMoveTime = millis();
-  resetSwingDetection();
-  bladeLength = NUM_LEDS;
-
-  if (prevState == STATE_BLADE_OFF || prevState == STATE_FULL_OFF) {
-    playIgniteSound();
-    igniteAnimation(700);
-    // start hum immediately after ignite (hum is a loop/continuous track)
-    playHumSound();
-  } else if (prevState == STATE_SWING) {
-    // Coming back from swing: ensure we set visual and hum once swing done
-    playHumSound();
-    currentLit = bladeLength;
-    setBladeColor(colorPalette[colorIndex]);
-  } else {
-    playHumSound();
-    currentLit = bladeLength;
-    setBladeColor(colorPalette[colorIndex]);
-  }
-}
-
-void transitionToSwing(float delta, unsigned long now) {
-  Serial.print(F("Transitioning from "));
-  Serial.print(getStateName(currentState));
-  Serial.print(F(" to SWING (delta g): "));
-  Serial.println(delta, 3);
-  currentState = STATE_SWING;
-  oledUpdate();
-  swingStartTime = now;
-  lastSwingStartTime = now;
-
-  // Start the swing sound and mark that swing sound is playing.
-  playSwingSound();
-
-  // No visual tip flash - keep blade as-is
-
-  // small, short pause to let the swing sound start (retain previous behavior)
-  delay(900);
-}
-
-//////////////////////
-// main loop / setup //
-//////////////////////
-
-void updateStateMachine() {
-  unsigned long now = millis();
-  powerButton.tick(); // process OneButton events
-  switch (currentState) {
-    case STATE_FULL_OFF:
-      handleStateFullOff(now);
-      break;
-    case STATE_BLADE_OFF:
-      handleStateBladeOff(now);
-      break;
-    case STATE_BLADE_ON:
-      handleStateBladeOn(now);
-      break;
-    case STATE_SWING:
-      handleStateSwing(now);
-      break;
-  }
-}
+#endif
 
 void setup() {
-  Serial.begin(115200);
-  while (!Serial && millis() < 3000); // Wait up to 3s for Serial
-
-  Serial.println(F("\n=== Lightsaber Controller (minimal animations) ==="));
-
-  Wire.begin();
-
-  pinMode(PIN_BTN_POWER, INPUT_PULLUP);
-  pinMode(PIN_DFPLAYER_BUSY, INPUT);
-
-  powerButton.attachClick(handleButtonClick);
-  powerButton.attachDoubleClick(handleButtonDoubleClick); // double click cycles color
-  powerButton.attachLongPressStart(handleButtonLongPressStart); // long press = full off
-
-  // FastLED init
-  FastLED.addLeds<NEOPIXEL, LED_PIN>(leds, NUM_LEDS);
-  FastLED.setBrightness(LED_BRIGHTNESS);
-  bladeClear();
-
-  oledInit();
-  dfInit();
-  initializeMPU();
-  calibrateBaseline();
-
-  currentState = STATE_BLADE_OFF; // start in blade off
-  oledUpdate();
-  lastMoveTime = millis();
-  lastIMUTime = millis();
-
-  Serial.println(F("Ready. Single-click: ignite/extinguish. Double-click: change color. Long-press: full off."));
+#if DEBUG_SERIAL
+  PORTD |= _BV(1);
+  DDRD |= _BV(1);
+#endif
+  settingsLoad();
+  buttonsInit();
+  audioInit();
+  bladeInit();
+  bladeSetBrightness(cfg.bright);
+  uiInit();
+  twiInit();
+  sys.imuOk = imuInit();
+  if (sys.imuOk) imuCalibrateBias(false); // only takes if the saber is lying still
+  powerInit();
+  saberInit(millis());
 }
 
 void loop() {
-  unsigned long now = millis();
-  powerButton.tick(); // keep button responsive
-  oledTick();
+  uint32_t now = millis();
+  sys.now = now;
+  buttonsUpdate(now);
 
-  // Paced with millis() instead of delay() so the OLED keeps drawing while the blade is off.
-  bool lit = currentState == STATE_BLADE_ON || currentState == STATE_SWING;
-  if (now - lastIMUTime >= (lit ? IMU_SAMPLE_MS : 40UL)) {
-    lastIMUTime = now;
-    updateStateMachine();
+  static uint32_t lastImu;
+  bool asleep = sys.mode == MODE_SLEEP;
+  if (sys.imuOk && (!asleep || now - lastImu >= 40)) {
+    imuUpdate(now);
+    lastImu = now;
+  }
+
+  saberUpdate(now);
+  audioUpdate(now);
+  powerUpdate(now);
+  if (bladeRender(now)) ledShow(leds, NUM_LEDS, bladeBrightness(), LED_MAX_MA);
+  uiPump(now);
+  settingsUpdate(now);
+
+#if DEBUG_SERIAL
+  debugPrint(now);
+#endif
+
+  if (asleep) {
+    // idle until the next timer tick; the millis() interrupt wakes us every ms
+    set_sleep_mode(SLEEP_MODE_IDLE);
+    sleep_mode();
   }
 }

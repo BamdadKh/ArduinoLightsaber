@@ -9,11 +9,11 @@
 | Ref | Part | Notes |
 |-----|------|-------|
 | A1 | Arduino Nano v3 (ATmega328P) | Socketed on 2×15 headers |
-| U1 | GY-521 (MPU-6050) | I²C, address `0x68`; accel only is used |
+| U1 | GY-521 (MPU-6050) | I²C, address `0x68`; gyro + accel (±2000 °/s, ±16 g) |
 | U2 | DFRobot DFPlayer Mini (DFR0299) | micro-SD with sound files, see [`firmware/sd-card`](../firmware/sd-card/README.md) |
 | J1 | WS2812B strip, 144 LEDs | 3-pin header: GND / data / 5V |
 | J2 | Momentary push button (main) | To GND, internal pull-up |
-| J4 | Momentary push button (aux) | To GND — not used by firmware yet |
+| J4 | Momentary push button (aux) | To GND, internal pull-up |
 | J3 | **SSD1306 OLED** (as built) | The schematic calls this header Bluetooth (D8/D9), but the OLED is wired here and runs on software I²C. SDA → D8 (white), SCL → D9 (yellow) |
 | J5 | Intended for the OLED (I²C on A4/A5) | Unused as built |
 | J7 | Speaker/amp header | DFPlayer `DAC_R` + 5V + GND → external amp |
@@ -25,33 +25,37 @@
 
 | Nano pin | Net | Connected to | Used in firmware |
 |----------|-----|--------------|------------------|
-| D2  | `d2`  | J2 main button | ✅ `PIN_BTN_POWER` |
-| D3  | `d3`  | J4 aux button | ❌ |
-| D6  | `d6`  | J1 WS2812B data | ✅ `LED_PIN` |
-| D8  | `d8`  | J3 → OLED SDA (white) | ✅ `PIN_OLED_SDA` (software I²C) |
-| D9  | `d9`  | J3 → OLED SCL (yellow) | ✅ `PIN_OLED_SCL` (software I²C) |
-| D10 | —     | DFPlayer TX | ✅ SoftwareSerial RX |
-| D11 | —     | DFPlayer RX | ✅ SoftwareSerial TX |
+| D2  | `d2`  | J2 main button | ✅ `PIN_BTN_MAIN` |
+| D3  | `d3`  | J4 aux button | ✅ `PIN_BTN_AUX` |
+| D6  | `d6`  | J1 WS2812B data | ✅ `PIN_LED` |
+| D8  | `d8`  | J3 → OLED SDA (white) | ✅ software I²C (`oled.cpp`, PB0) |
+| D9  | `d9`  | J3 → OLED SCL (yellow) | ✅ software I²C (`oled.cpp`, PB1) |
+| D10 | —     | DFPlayer TX | ✅ polled once at boot to detect the player (`audio.cpp`, PB2) |
+| D11 | —     | DFPlayer RX | ✅ bit-banged 9600 baud TX (`audio.cpp`, PB3) |
 | A4  | `sda` | MPU-6050 (+ J5, unused) | ✅ I²C |
 | A5  | `scl` | MPU-6050 (+ J5, unused) | ✅ I²C |
-| A7  | `a7`  | J8 battery (unrouted) | ❌ |
-| D7  | —     | *nothing* | ⚠️ firmware declares `PIN_DFPLAYER_BUSY 7`, but BUSY is not wired |
+| A7  | `a7`  | J8 battery (bodge wire, see below) | ✅ `PIN_BATTERY` |
 
 ## Known issues
 
 Found by comparing the firmware, schematic and PCB, and by running DRC.
 
 What checks out:
-- Every pin the firmware drives (D2, D6, D10, D11, A4, A5) matches both the schematic and the PCB.
+- Every routed pin the firmware uses (D2, D3, D6, D10, D11, A4, A5) matches both the schematic and the PCB.
 - The Nano, DFPlayer and GY-521 footprints have pads in the same physical order as the real modules.
 - The 5V and GND nets are copper pours, not thin traces.
 
 Board issues:
 - **A7 battery sense is not routed.** `J8` and `A1` pin 26 are only a ratsnest line in the PCB,
-  with no copper. Battery monitoring needs a bodge wire.
-- **DFPlayer BUSY (pin 16) is not connected.** The firmware can't sense when a track ends, so
-  it tracks playback with `isHumPlaying`/`isSwingPlaying` flags. It also declares
-  `PIN_DFPLAYER_BUSY 7`, but nothing is wired to D7.
+  with no copper, so battery monitoring needs a bodge wire from J8 to A7. It connects straight
+  to the cell's + terminal with no divider, which is fine because the cell never exceeds Vcc.
+  The firmware measures Vcc against the internal 1.1 V bandgap, so readings stay right when
+  the boost output moves. It only trusts A7 after several in-range samples, so a board without
+  the bodge just hides the battery gauge (`BATTERY_SENSE` in `config.h` turns it off
+  completely).
+- **DFPlayer BUSY (pin 16) is not connected.** The firmware is designed around this: the hum
+  is looped by the player itself, effects are "adverts" that resume it, and one-shot lengths
+  come from `sound_lengths.h`.
 - **The DFPlayer's built-in amp is unused.** SPK1/SPK2 aren't connected. Audio leaves through
   `DAC_R` (right channel only) on J7, so an external amplifier is required.
 - **No 1 kΩ series resistor** between Nano TX and DFPlayer RX. DFRobot recommends one to reduce noise and hiss.
@@ -65,9 +69,10 @@ Board issues:
 - **The power system isn't in the schematic or PCB.** The board only has a `5V/G` input (J6) and a
   `bat+` pad (J8). The battery, charging, switch and 5V regulation all live off the board and
   aren't documented yet (TODO).
-- **Wired but unused by the firmware:** aux button (D3).
 - **No LED current limit in hardware.** 144 WS2812B LEDs at full white draw about 8.6 A.
-  The firmware caps global brightness at 160/255 but doesn't set a FastLED power limit.
+  The firmware estimates each frame's current and scales it to `LED_MAX_MA` (2.2 A default,
+  set it to what your boost converter can deliver). Even when dark, the strip idles at roughly
+  1 mA per LED, so sleep mode doesn't stop that drain. Use the hilt's power switch for storage.
 - DRC on the PCB file reports 47 violations: 25 isolated copper, 7 clearance, 7 courtyard overlap, and minor silk issues.
 - `fp-lib-table` points to a `DFR0299.pretty` in the author's Downloads folder, which no longer exists.
   The board still opens because its footprints are stored inside the `.kicad_pcb`.
