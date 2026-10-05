@@ -25,8 +25,9 @@ Firmware **KYBER OS 2**: a small feature set, done properly.
   with no framebuffer.
 - Auto-retract after 5 minutes idle. Settings live in EEPROM.
 
-*Run `python firmware/tools/sim/run_sim.py` to render the current OLED screens and blade
-effects into `firmware/tools/out/`.*
+<img src="docs/images/oled-screens.png" alt="OLED screens: boot self-test, ready, low battery, lit, swing, blaster, lockup, menu" width="100%">
+
+*The OLED screens as rendered by the firmware's own UI code in the PC simulator (1 px = 1 OLED pixel).*
 
 ## Controls
 
@@ -174,10 +175,17 @@ How it fits in 2 KB of RAM and a 16 MHz CPU:
 python firmware/tools/gen_assets.py     # font + pixel-art icons -> assets.h (edit the art in the script)
 python firmware/tools/make_sounds.py    # synthesize the sound font -> sd-card/, sound_lengths.h
 python firmware/tools/sim/run_sim.py    # compile ui/blade on the PC, render screens + blade timelines
+python firmware/tools/make_readme_images.py  # rebuild docs/images from the simulator output
+python firmware/tools/get_saber_sounds.py    # install the real blade sounds on the SD card image
 ```
 
 The simulator (MSYS2 g++ or MSVC) runs the real `ui.cpp` and `blade.cpp` and writes
 PNGs to `firmware/tools/out/`. Use it to design screens and effects without flashing.
+
+<img src="docs/images/blade-effects.png" alt="Blade timelines from the simulator" width="620">
+
+*Blade timelines from the simulator: time runs left to right, hilt at the bottom. Top: ignite and
+retract, then the effects. Below: each colour with a swing in the middle.*
 
 ### SD card
 
