@@ -52,8 +52,8 @@ static void sendBytes(const uint8_t* ptr, uint16_t count) {
     "sbiw %[count], 1\n\t"
     "brne head20\n"
     : [port] "+e"(port), [byte] "+r"(b), [bit] "+r"(bit), [next] "+r"(next), [count] "+w"(count),
-      [ptr] "+e"(ptr)
-    : [hi] "r"(hi), [lo] "r"(lo));
+      [ptr] "+e"(ptr), // hi/lo as in-out operands: as plain inputs GCC may give lo the
+      [hi] "+r"(hi), [lo] "+r"(lo)); // same register as next (equal at entry), jamming the line high
 }
 
 void ledShow(CRGB* px, uint8_t n, uint8_t brightness, uint16_t maxMa) {

@@ -41,5 +41,4 @@ void audioPlayThenLoop(uint8_t track, uint16_t ms, uint8_t loopTrack); // e.g. i
 void audioAdvert(uint8_t track);          // effect overlay (latest request wins)
 void audioAdvertRandom(uint8_t first, uint8_t count);
 void audioStop();
-void audioSwell(uint8_t intensity);       // 0-255 swing intensity -> hum volume swell
 bool audioBusy();                         // commands still queued

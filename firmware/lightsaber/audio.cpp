@@ -1,11 +1,13 @@
 #include "audio.h"
 #include "config.h"
-#include "settings.h"
 #include "mathx.h"
 
 #define TX_BIT _BV(3) // D11 = PB3 -> DFPlayer RX
 #define RX_BIT _BV(2) // D10 = PB2 <- DFPlayer TX
 #define BIT_CYCLES (F_CPU / 9600)
+// A one-shot starts ~150 ms after audioPlay() (loop-off and play commands go out first), so the
+// stop lands just after its faded tail. Any later and the player restarts the clip for a moment.
+#define STOP_MARGIN_MS 130
 
 enum : uint8_t {
   CMD_VOLUME = 0x06, CMD_PLAY_MP3 = 0x12, CMD_ADVERT = 0x13, CMD_STOP_ADVERT = 0x15,
@@ -21,8 +23,11 @@ static uint8_t pendingAdvert;
 static uint8_t loopNext;      // track to loop once the one-shot ends
 static uint32_t loopAt;
 static uint32_t lastSend, lastAdvert, lastVolume;
-static uint8_t baseVol = 20, sentVol = 255, swell;
-static bool muted, looping;
+static uint8_t baseVol = 20, sentVol = 255;
+static bool muted;
+static bool looping = true;   // assume the worst: after an Arduino reset the player may still be looping
+static uint32_t stopAt;       // when to stop a finished one-shot
+static const uint16_t LENGTHS_MS[] PROGMEM = SND_LENGTHS_MS;
 
 // ---------------------------------------------------------------- wire level
 
@@ -120,10 +125,14 @@ void audioPlay(uint8_t track) {
   if (looping) push(CMD_SINGLE_LOOP, 1);
   looping = false;
   push(CMD_PLAY_MP3, track);
+  // The player has no "play once and stop": it would restart or run on into the next file.
+  uint8_t last = sizeof(LENGTHS_MS) / sizeof(LENGTHS_MS[0]) - 1;
+  stopAt = track <= last ? millis() + pgm_read_word(&LENGTHS_MS[track]) + STOP_MARGIN_MS : 0;
 }
 
 void audioLoop(uint8_t track) {
   resetMain();
+  stopAt = 0;
   push(CMD_PLAY_MP3, track);
   push(CMD_SINGLE_LOOP, 0);
   looping = true;
@@ -133,6 +142,7 @@ void audioPlayThenLoop(uint8_t track, uint16_t ms, uint8_t loopTrack) {
   audioPlay(track);
   loopNext = loopTrack;
   loopAt = millis() + ms;
+  stopAt = 0; // the hum takes over
 }
 
 void audioAdvert(uint8_t track) { pendingAdvert = track; }
@@ -147,6 +157,7 @@ void audioAdvertRandom(uint8_t first, uint8_t count) {
 
 void audioStop() {
   resetMain();
+  stopAt = 0;
   if (looping) push(CMD_SINGLE_LOOP, 1);
   push(CMD_STOP, 0);
   looping = false;
@@ -154,7 +165,6 @@ void audioStop() {
 
 void audioSetVolume(uint8_t v) { baseVol = v > 30 ? 30 : v; }
 void audioMute(bool m) { muted = m; }
-void audioSwell(uint8_t intensity) { swell = (uint16_t)intensity * cfg.boost * 3 / 255; }
 bool audioBusy() { return qLen || pendingAdvert || loopNext; }
 
 void audioUpdate(uint32_t now) {
@@ -165,6 +175,10 @@ void audioUpdate(uint32_t now) {
     loopNext = 0;
   }
   if (now - lastSend < AUDIO_CMD_GAP_MS) return;
+  if (stopAt && !qLen && !loopNext && (int32_t)(now - stopAt) >= 0) {
+    stopAt = 0;
+    push(CMD_STOP, 0);
+  }
 
   if (qLen) {
     Cmd c = queue[qHead];
@@ -180,10 +194,8 @@ void audioUpdate(uint32_t now) {
     lastSend = lastAdvert = now;
     return;
   }
-  // Volume last: swell changes are frequent but least important. Small steps are
-  // rate-limited so the serial line stays free for effects.
-  uint8_t want = muted ? 0 : baseVol + swell;
-  if (want > 30) want = 30;
+  // Volume last, after every effect, so the serial line stays free for them.
+  uint8_t want = muted ? 0 : baseVol;
   if (want != sentVol) {
     uint8_t diff = want > sentVol ? want - sentVol : sentVol - want;
     if (sentVol == 255 || (now - lastVolume >= 90 && (diff >= 2 || now - lastVolume > 250))) {

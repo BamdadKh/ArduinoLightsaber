@@ -46,13 +46,12 @@ What checks out:
 - The 5V and GND nets are copper pours, not thin traces.
 
 Board issues:
-- **A7 battery sense is not routed.** `J8` and `A1` pin 26 are only a ratsnest line in the PCB,
-  with no copper, so battery monitoring needs a bodge wire from J8 to A7. It connects straight
-  to the cell's + terminal with no divider, which is fine because the cell never exceeds Vcc.
-  The firmware measures Vcc against the internal 1.1 V bandgap, so readings stay right when
-  the boost output moves. It only trusts A7 after several in-range samples, so a board without
-  the bodge just hides the battery gauge (`BATTERY_SENSE` in `config.h` turns it off
-  completely).
+- **A7 battery sense is not routed, and the firmware doesn't need it.** With the cell wired
+  straight to the Nano's 5V pin, Vcc *is* the cell voltage, so the firmware measures Vcc
+  against the internal 1.1 V bandgap. No bodge wire. The bandgap is only good to about
+  +-10 %: check the menu > BATTERY millivolts against a multimeter once and scale
+  `BANDGAP_MV` in `config.h` if they differ. The percentage and low-battery warning use the
+  cell's *resting* voltage (blade off); the lit-blade sag is ignored except as a brown-out guard.
 - **DFPlayer BUSY (pin 16) is not connected.** The firmware is designed around this: the hum
   is looped by the player itself, effects are "adverts" that resume it, and one-shot lengths
   come from `sound_lengths.h`.

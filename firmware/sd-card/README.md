@@ -13,12 +13,18 @@ The firmware loops the hum on the main channel. Every short effect is a DFPlayer
 *advert*, which pauses the hum, plays, then lets the hum carry on. That's how one
 decoder does layered sound without the BUSY pin.
 
-The bundled font is synthesized from scratch by `firmware/tools/make_sounds.py`. It's
-original and free to use. Regenerate it with:
+**Where the sounds come from.** The blade sounds (hum, ignite, retract, lockup, swings, clashes,
+blaster blocks) are real saber sounds from the *TeensySF* font in the ProffieOS default SD card,
+by Fredrik Hubinette, licensed [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/).
+Menu, boot and other UI sounds are synthesized (original). To rebuild the card contents:
 
 ```bash
-python firmware/tools/make_sounds.py
+python firmware/tools/make_sounds.py        # synthesized UI sounds (+ placeholders)
+python firmware/tools/get_saber_sounds.py   # real blade sounds over the top, updates sound_lengths.h
 ```
+
+The second script downloads the ~200 MB ProffieOS zip once (cached in `firmware/tools/out/`).
+Tracks the firmware no longer uses (drag, melt, lightning, stab, force, training...) are harmless leftovers.
 
 ## Track map
 

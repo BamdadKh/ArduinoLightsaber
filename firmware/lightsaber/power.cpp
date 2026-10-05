@@ -3,11 +3,25 @@
 #include "state.h"
 #include "platform.h"
 
+// The cell is wired straight to the Nano's 5V pin, so Vcc is the cell voltage. Two numbers
+// matter and they must never be mixed up:
+//   rest   the cell with the blade dark (sampled once the load has been gone for a moment).
+//          This drives the percentage, the low warning and the lockout.
+//   loaded the cell with the blade lit. It sags 0.2-0.5 V under a full strip, which is normal,
+//          so it is only used as a last-resort brown-out guard.
+// Warnings latch: one warning per low spell, never one per ignition.
+
 // Resting Li-ion discharge curve, mV at 0, 10, ... 100 %
 static const uint16_t CURVE[11] PROGMEM = {3300, 3480, 3590, 3660, 3710, 3760, 3820, 3900, 3980, 4070, 4150};
 
-static uint32_t lastSample, lowSince;
-static uint8_t goodCount;
+#define SAMPLE_MS 250
+#define SETTLE_MS 1500       // after the blade goes dark, wait this long before trusting the cell
+#define SAG_HOLD_MS 1500     // loaded voltage must stay below BATT_SAG_MV this long
+#define RECHARGED_MV 3900    // a brown-out lockout only clears once the cell is charged again
+
+static uint32_t lastSample, darkAt, sagSince;
+static uint16_t rest, loaded;
+static bool wasOn, haveRest, sagLocked;
 
 static uint16_t readVccMv() {
   ADMUX = _BV(REFS0) | 0x0E; // AVcc reference, measure the 1.1 V bandgap
@@ -34,44 +48,50 @@ static uint8_t percentFor(uint16_t mv) {
 
 void powerInit() {
   sys.battPct = 100;
-  sys.battMv = 0;
+  sys.onBattery = true;
 }
 
 void powerUpdate(uint32_t now) {
-#if BATTERY_SENSE
-  if (now - lastSample < 400) return;
+  if (now - lastSample < SAMPLE_MS) return;
   lastSample = now;
-  uint16_t vcc = readVccMv();
-  analogRead(PIN_BATTERY); // switches the mux back; throw away
-  uint16_t raw = analogRead(PIN_BATTERY);
-  uint16_t mv = (uint32_t)raw * vcc / 1023;
+  uint16_t mv = readVccMv();
 
-  // A floating pin wanders; a real cell reads in range, sample after sample.
-  if (mv > 2700 && mv < 4500) {
-    if (goodCount < 3 && ++goodCount == 3) sys.battMv = mv;
-  } else {
-    goodCount = 0;
-  }
-  sys.battPresent = goodCount == 3;
-  if (!sys.battPresent) {
-    sys.battLow = false;
+  if (mv > BATT_USB_MV) { // USB power: the number says nothing about the cell
+    sys.onBattery = false;
+    sagSince = 0;
     return;
   }
-  sys.battMv = (sys.battMv * 7u + mv) / 8;
-  // under blade load the cell sags ~0.15 V; judge charge on a load-corrected value
-  uint16_t est = sys.battMv + (sys.mode == MODE_ON ? 150 : 0);
-  uint8_t pct = percentFor(est);
-  // hysteresis so the readout doesn't flicker between two values
-  if (pct + 1 < sys.battPct || pct > sys.battPct + 1 || pct == 0 || pct == 100) sys.battPct = pct;
-  sys.battLow = sys.battMv < BATT_WARN_MV;
-  if (sys.battMv < BATT_CUTOFF_MV) {
-    if (!lowSince) lowSince = now;
-  } else {
-    lowSince = 0;
-  }
-#else
-  (void)now;
-#endif
-}
+  sys.onBattery = true;
 
-bool powerCritical() { return lowSince && sys.now - lowSince > 5000; }
+  bool on = sys.mode == MODE_ON;
+  if (wasOn && !on) darkAt = now;
+  wasOn = on;
+
+  if (on) {
+    loaded = (loaded * 3u + mv) / 4;
+    if (loaded >= BATT_SAG_MV) sagSince = 0;
+    else if (!sagSince) sagSince = now;
+    if (sagSince && now - sagSince > SAG_HOLD_MS) {
+      sagLocked = true;
+      sys.battEmpty = true;
+    }
+    return;
+  }
+  sagSince = 0;
+  if (haveRest && now - darkAt < SETTLE_MS) return;
+
+  rest = haveRest ? (rest * 7u + mv) / 8 : mv;
+  uint8_t pct = percentFor(rest);
+  // hysteresis so the readout doesn't flicker between two values
+  if (!haveRest || pct + 1 < sys.battPct || pct > sys.battPct + 1 || pct == 0 || pct == 100) sys.battPct = pct;
+  haveRest = true;
+  sys.battMv = rest;
+
+  if (!sys.battLow && rest < BATT_LOW_MV) sys.battLow = true;
+  else if (sys.battLow && rest > BATT_LOW_MV + 100) sys.battLow = false;
+
+  if (rest < BATT_EMPTY_MV) sys.battEmpty = true;
+  else if (sys.battEmpty && rest >= (sagLocked ? RECHARGED_MV : BATT_EMPTY_MV + 150)) {
+    sys.battEmpty = sagLocked = false;
+  }
+}

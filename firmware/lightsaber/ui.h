@@ -8,7 +8,6 @@ void uiPump(uint32_t now);                 // call every loop()
 void uiToast(const char* msgP, int16_t num = -1, uint16_t ms = 1300);
 void uiFlash(uint32_t now);                // hardware-inverted flash (clash)
 void uiSetFlip(bool flip);
-void uiSleep(bool sleep);
 void uiRedraw();                           // restart the frame immediately
 
 // exposed for the PC simulator

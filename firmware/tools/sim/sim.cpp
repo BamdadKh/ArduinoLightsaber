@@ -61,19 +61,12 @@ static void runBlade(const char* name, uint32_t t0, uint32_t t1, std::function<v
 static void resetSys() {
   memset(&sys, 0, sizeof(sys));
   memset(&motion, 0, sizeof(motion));
-  settingsDefaults(false);
+  settingsDefaults();
   sys.imuOk = true;
   sys.audio = AUDIO_OK;
-  sys.battPresent = true;
+  sys.onBattery = true;
   sys.battMv = 3910;
   sys.battPct = 76;
-  sys.hue = cfg.hue[cfg.preset];
-  motion.tempC = 29;
-}
-
-static void setPreset(uint8_t p) {
-  cfg.preset = p;
-  sys.hue = cfg.hue[p];
 }
 
 int main(int argc, char** argv) {
@@ -93,9 +86,9 @@ int main(int argc, char** argv) {
   resetSys();
   g_now = 200000;
   sys.mode = MODE_OFF;
-  setPreset(2);
+  cfg.preset = 2;
   snap("idle");
-  setPreset(5);
+  cfg.preset = 4;
   sys.battLow = true;
   sys.battPct = 9;
   g_now = 200300; snap("idle_lowbatt");
@@ -104,21 +97,14 @@ int main(int argc, char** argv) {
   g_now = 300000;
   sys.mode = MODE_ON;
   sys.ext = 255;
-  motion.pitch = 35;
   snap("on_still");
   motion.swing = 180;
   motion.swingDps = 830;
-  motion.pitch = -20;
-  sys.combo = 4;
-  sys.comboAt = g_now - 200;
   snap("on_swing");
   motion.swing = 0;
-  sys.combo = 0;
-  sys.lockup = LOCK_CLASH;
+  sys.lockup = true;
   snap("on_lockup");
-  sys.lockup = LOCK_LIGHTNING;
-  snap("on_lightning");
-  sys.lockup = LOCK_NONE;
+  sys.lockup = false;
   sys.blastAt = g_now - 120;
   sys.blastPos = 150;
   snap("on_blaster");
@@ -126,74 +112,13 @@ int main(int argc, char** argv) {
   sys.ext = 120;
   snap("on_igniting");
   sys.ext = 255;
-  setPreset(2); // unstable style
-  cfg.style[2] = STYLE_UNSTABLE;
-  snap("on_unstable");
 
-  // telemetry HUD
-  sys.hud = true;
-  for (int i = 0; i < HIST_LEN; i++) {
-    int v = (int)(120 + 110 * ((i * 37 % 17) / 17.0) * ((i % 9) < 5 ? 1 : 0.2));
-    sys.hist[i] = (uint8_t)v;
-  }
-  sys.histHead = 10;
-  motion.swingDps = 734;
-  sys.sessPeak = 1288;
-  sys.combo = 3;
-  sys.comboAt = g_now - 300;
-  snap("hud");
-  sys.hud = false;
-  sys.combo = 0;
-
-  // colour wheel
-  sys.colorWheel = true;
-  sys.hue = 40;
-  snap("color_40");
-  sys.hue = 170;
-  snap("color_170");
-  sys.colorWheel = false;
-
-  // toast
-  uiToast("SAVED", -1, 1000);
+  uiToast("LOW BATT", -1, 1000);
   snap("toast");
   sys.toast = nullptr;
-  uiToast("LOW BATT", -1, 1000);
-  snap("toast_marquee");
-  sys.toast = nullptr;
 
-  // training
-  sys.training = true;
-  sys.trainLives = 3;
-  sys.trainScore = 0;
-  sys.trainPhase = TRAIN_WAIT;
-  g_now = 300256; // blink phase on
-  snap("train_ready");
-  sys.trainPhase = TRAIN_INCOMING;
-  sys.trainScore = 7;
-  sys.trainLives = 2;
-  sys.trainWindow = 700;
-  sys.trainAt = g_now - 350;
-  sys.trainPos = 180;
-  sys.trainReact = 312;
-  snap("train_incoming");
-  sys.trainPhase = TRAIN_RESULT;
-  sys.trainHit = false;
-  sys.trainAt = g_now - 150;
-  snap("train_deflect");
-  sys.trainHit = true;
-  snap("train_hit");
-  sys.trainPhase = TRAIN_OVER;
-  cfg.trainBest = 12;
-  snap("train_over");
-  sys.training = false;
-
-  // menu pages
   sys.mode = MODE_MENU;
   sys.ext = 0;
-  cfg.ignitions = 142;
-  cfg.clashes = 1093;
-  cfg.peakDps = 1640;
-  cfg.onSeconds = 3600 * 7 + 100;
   for (int i = 0; i < MI_COUNT; i++) {
     sys.menuItem = (uint8_t)i;
     char n[32];
@@ -202,31 +127,22 @@ int main(int argc, char** argv) {
   }
 
   // ------------------------------------------------------------ blade timelines
-  static const char* IGN[] = {"scroll", "spark", "stutter", "photon"};
-  for (int ig = 0; ig < 4; ig++) {
-    resetSys();
-    setPreset(0);
-    cfg.ignition[0] = (uint8_t)ig;
-    sys.mode = MODE_ON;
-    std::string n = std::string("ignite_") + IGN[ig];
-    bool retracted = false;
-    runBlade(n.c_str(), 1000, 2800, [&](uint32_t t) {
-      if (t == 1000) bladeIgnite(t);
-      if (t >= 2000 && !retracted) {
-        bladeRetract(t);
-        retracted = true;
-      }
-    });
-  }
+  resetSys();
+  sys.mode = MODE_ON;
+  bool retracted = false;
+  runBlade("ignite", 1000, 2800, [&](uint32_t t) {
+    if (t == 1000) bladeIgnite(t);
+    if (t >= 2000 && !retracted) {
+      bladeRetract(t);
+      retracted = true;
+    }
+  });
 
-  static const char* STY[] = {"stable", "unstable", "pulse", "fire", "rainbow", "plasma", "candy", "flow"};
-  static const uint8_t PRESET_FOR_STYLE[] = {0, 2, 3, 4, 5, 6, 7, 1};
-  for (int st = 0; st < 8; st++) {
+  for (int pr = 0; pr < NUM_PRESETS; pr++) {
     resetSys();
-    setPreset(PRESET_FOR_STYLE[st]);
-    cfg.style[cfg.preset] = (uint8_t)st;
+    cfg.preset = (uint8_t)pr;
     bladeIgnite(1000, true);
-    std::string n = std::string("style_") + STY[st];
+    std::string n = std::string("look_") + std::to_string(pr);
     runBlade(n.c_str(), 1200, 3200, [&](uint32_t t) {
       // one swing in the middle: intensity ramps up and decays
       int k = (int)t - 2000;
@@ -237,35 +153,14 @@ int main(int argc, char** argv) {
   }
 
   resetSys();
-  setPreset(0);
   bladeIgnite(500, true);
-  runBlade("effects", 800, 5600, [&](uint32_t t) {
+  runBlade("effects", 800, 3800, [&](uint32_t t) {
     if (t == 1000) bladeClash(t);
-    if (t == 1400) bladeBlast(t, 140);
-    if (t == 1800) bladeStab(t);
-    if (t == 2200) bladeForce(t);
-    if (t == 3000) { sys.lockup = LOCK_CLASH; sys.lockupAt = t; }
-    if (t == 3600) { sys.lockup = LOCK_DRAG; sys.lockupAt = t; }
-    if (t == 4200) { sys.lockup = LOCK_MELT; sys.lockupAt = t; }
-    if (t == 4800) { sys.lockup = LOCK_LIGHTNING; sys.lockupAt = t; }
-    if (t == 5400) sys.lockup = LOCK_NONE;
+    if (t == 1600) bladeBlast(t, 140);
+    if (t == 2200) { sys.lockup = true; }
+    if (t == 3200) sys.lockup = false;
   });
 
-  resetSys();
-  runBlade("meter", 1000, 3800, [&](uint32_t t) {
-    if (t == 1000) bladeMeter(t, 76);
-  });
-
-  resetSys();
-  setPreset(0);
-  bladeIgnite(500, true);
-  sys.training = true;
-  runBlade("train", 800, 2600, [&](uint32_t t) {
-    if (t == 1000) { sys.trainPhase = TRAIN_INCOMING; sys.trainPos = 180; }
-    if (t == 1600) { sys.trainPhase = TRAIN_RESULT; bladeBlast(t, 180); }
-    if (t == 2000) bladeHitFlash(t);
-  });
-
-  printf("done\n");
+  puts("done");
   return 0;
 }

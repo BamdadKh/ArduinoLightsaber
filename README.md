@@ -8,39 +8,25 @@ and one-button control.
 
 ## Features
 
-Firmware **KYBER OS 2**, written from scratch for the V3 board:
+Firmware **KYBER OS 2**: a small feature set, done properly.
 
-- **8 blade styles:** solid, feral (unstable), pulse, fire, prism (rainbow), haze
-  (plasma), candy and flow. Each one reacts to motion: swinging speeds up its animation
-  and heats the fast-moving tip toward white.
-- **4 ignition / retraction animations:** sweep, spark, surge (sputtering) and bolt
-  (a bolt races to the tip, then the blade fills back down, and it dissolves on retract).
-- **Motion engine on the MPU-6050 gyro and accelerometer:** swing accents (slow and
-  fast banks), clash detection, stab, twist gestures, and blade pitch. Sensitivities
-  are adjustable, and there's a one-press axis calibration.
-- **Effects:** blaster block, lockup, drag (automatic when the tip points down), melt
-  (stab during a lockup), lightning block and force push. Each has its own light show
-  and sound.
-- **Layered sound on a single DFPlayer:** a seamless hum loop with swing and clash
-  "adverts" on top, plus a hum swell that follows swing speed. It comes with an
-  original synthesized font of 37 tracks.
-- **Colour wheel:** twist the hilt like a dial to tune the hue live.
-- **Training droid game:** a remote fires at random points on the blade, and you swing
-  or block before the window closes. The window shrinks as you score. 3 lives, best
-  score saved.
-- **Portrait OLED UI:** a live mini-saber mirroring the blade, a telemetry HUD with a
-  swing waveform, and a 16-page icon menu. All of it is rendered as scanlines with
-  no framebuffer.
-- **Gesture ignition** (twist, swing or stab), muted ignition, and presets that remember
-  your colour, style and ignition choices.
-- **Battery monitoring:** measured against the internal bandgap, with a blade meter,
-  a low-battery warning, and cutoff protection.
-- **Idle auto-retract and sleep.** Settings and lifetime stats (ignitions, clashes,
-  peak deg/s, hours) live in EEPROM.
+- **Blade:** 144 LEDs, 6 colours (azure, jade, ruby, amber, iris, ice) in one carefully tuned
+  look (hot core, slow shimmer, gentle breathing), with a sweep ignite/retract and tip flare. Swinging heats the blade toward
+  white, and blaster blocks flash where they land.
+- **Motion:** swing detection on the MPU-6050 (total rotation speed, so no axis setup), one sensitivity
+  setting, one-press gyro calibration (lay it still, menu > CALIBRATE).
+- **Sound:** a seamless hum loop on a single DFPlayer, with swing and blaster sounds
+  layered on top, and a lockup loop. The blade sounds are a real saber sound font (TeensySF, CC BY-SA 4.0; see
+  [firmware/sd-card/README.md](firmware/sd-card/README.md)).
+- **Battery:** the cell feeds the 5V pin directly and is read as Vcc. Percentage and warnings
+  use the resting voltage, so the sag from a lit blade doesn't trigger them. One low-battery
+  warning per low spell, and the blade is locked out only when the cell is really empty.
+- **Portrait OLED:** a live mini-saber, the battery, and an 8-page menu. Rendered as scanlines
+  with no framebuffer.
+- Auto-retract after 5 minutes idle. Settings live in EEPROM.
 
-<img src="docs/images/oled-screens.png" alt="OLED screens: boot self-test, ready, lit with swing meter, lockup, telemetry, colour wheel, training, menu" width="100%">
-
-*The OLED screens as rendered by the firmware's own UI code in the PC simulator (1 px = 1 OLED pixel).*
+*Run `python firmware/tools/sim/run_sim.py` to render the current OLED screens and blade
+effects into `firmware/tools/out/`.*
 
 ## Controls
 
@@ -49,35 +35,24 @@ Two buttons: **MAIN** (D2) and **AUX** (D3).
 | Blade off | |
 |---|---|
 | MAIN click | Ignite |
-| MAIN double-click | Ignite muted |
-| MAIN triple-click / both buttons | Battery check (meter on the blade) |
-| MAIN hold 1.5 s | Sleep |
-| AUX click / double-click | Next / previous preset |
+| AUX click / double-click | Next / previous colour |
 | AUX hold | Menu |
-| Twist the hilt (gesture on) | Ignite |
 
 | Blade on | |
 |---|---|
-| MAIN click | Retract (or leave training) |
-| MAIN double-click | Colour wheel: twist to tune, MAIN saves, AUX cancels |
-| MAIN triple-click | Toggle blade view / telemetry HUD |
-| MAIN hold | Lightning block (while held) |
-| AUX click | Blaster block (instant) |
-| AUX hold | Lockup while held. Tip down = drag, stab = melt |
-| Both buttons | Force push |
-| Swing, clash, stab | Detected automatically |
-| Twist the hilt (gesture on) | Retract |
+| MAIN click | Retract |
+| AUX click | Blaster block |
+| AUX hold | Lockup while held |
+| Swing | Detected automatically |
 
 | Menu | |
 |---|---|
 | AUX click / double-click | Next / previous page |
 | MAIN click | Change value / run action |
-| MAIN hold 1.5 s | Factory reset (on the RESET page) |
 | AUX hold | Save and exit |
 
-Menu pages: sound, light, style, colour, ignition, swing and clash sensitivity, gesture
-set, hum boost, sleep timer, screen flip, training, calibrate, stats, reset, exit.
-Style, colour and ignition preview on the blade as you change them.
+Menu pages: sound, light, colour, sensitivity, flip, calibrate, battery (millivolts), exit.
+Light and colour preview on the blade.
 
 ## Repository layout
 
@@ -107,7 +82,7 @@ media/
 | Sound | DFPlayer Mini → external amp + speaker |
 | Blade | WS2812B, 144 LEDs, data on D6 |
 | Input | Main button D2, aux button D3 |
-| Battery | 18650 sensed on A7 (J8) |
+| Battery | 18650 straight to the 5V pin, read as Vcc |
 | Display | 0.91" SSD1306 128×32 OLED (mounted along the hilt), software I²C on D8 (SDA) / D9 (SCL) |
 
 The full BOM, pin map and known PCB issues are in **[docs/hardware.md](docs/hardware.md)**.
@@ -147,8 +122,8 @@ arduino-cli compile -b arduino:avr:nano firmware/lightsaber
 arduino-cli upload -b arduino:avr:nano -p COM3 firmware/lightsaber
 ```
 
-Clone Nanos may need `arduino:avr:nano:cpu=atmega328old`. It builds to ~30.3 KB of the
-30 KB flash and uses 54% of RAM. Build-time options (pins, LED count, current budget,
+Clone Nanos may need `arduino:avr:nano:cpu=atmega328old`. It builds to ~19.5 KB of the
+30 KB flash and uses 42% of RAM. Build-time options (pins, LED count, current budget,
 battery thresholds, motion thresholds) are in
 [`firmware/lightsaber/config.h`](firmware/lightsaber/config.h).
 
@@ -160,22 +135,23 @@ arduino-cli compile -b arduino:avr:nano --build-property "compiler.cpp.extra_fla
 
 **First run:**
 1. If the screen is upside down, set it with menu > FLIP.
-2. Stand the saber blade-up and run menu > CALIBRATE. This teaches it which sensor
-   axis runs along the blade, which swing, stab, twist and pitch all depend on.
+2. Lay the saber still and run menu > CALIBRATE to zero the gyro (it also does this
+   by itself at power-up if the saber is still).
+3. Check menu > BATTERY against a multimeter; adjust `BANDGAP_MV` if it is off.
 
 ### Architecture
 
 | Module | Job |
 |--------|-----|
-| `saber.cpp` | Modes, controls, gestures -> effects and sounds |
-| `imu.cpp` | MPU-6050 at 1 kHz, +-2000 deg/s, +-16 g. Swing peak detection, high-pass clash, stab, twist, pitch, gyro drift tracking |
-| `blade.cpp` | Per-pixel style + ignition + effect overlay compositor. The only buffer is the LED array |
+| `saber.cpp` | Modes and controls -> effects and sounds |
+| `imu.cpp` | MPU-6050 at 1 kHz, +-2000 deg/s, +-16 g. Swing peak detection from total rotation speed, gyro drift tracking |
+| `blade.cpp` | Per-pixel blade look + ignition + effect overlay compositor. The only buffer is the LED array |
 | `color.cpp` | WS2812B driver (cycle-exact 16 MHz loop), current limiting, HSV |
 | `ui.cpp`, `gfx.h`, `oled.cpp` | Portrait OLED UI, streamed as scanlines |
 | `audio.cpp` | DFPlayer protocol, TX-only bit-banged serial, command queue, hum loop + adverts |
 | `buttons.cpp` | Debounce, multi-click, hold, chords |
-| `power.cpp` | Battery voltage against the 1.1 V bandgap |
-| `settings.cpp` | EEPROM settings, presets, lifetime stats |
+| `power.cpp` | Cell voltage (Vcc against the 1.1 V bandgap), resting vs loaded |
+| `settings.cpp` | EEPROM settings and the colour table |
 
 How it fits in 2 KB of RAM and a 16 MHz CPU:
 
@@ -203,11 +179,6 @@ python firmware/tools/sim/run_sim.py    # compile ui/blade on the PC, render scr
 The simulator (MSYS2 g++ or MSVC) runs the real `ui.cpp` and `blade.cpp` and writes
 PNGs to `firmware/tools/out/`. Use it to design screens and effects without flashing.
 
-<img src="docs/images/blade-effects.png" alt="Blade timelines from the simulator" width="520">
-
-*Blade timelines from the simulator: time runs left to right, hilt at the bottom.
-The bend in each style is a swing speeding the animation up.*
-
 ### SD card
 
 Copy `firmware/sd-card/MP3` and `firmware/sd-card/ADVERT` to a FAT32 micro-SD. See
@@ -216,8 +187,13 @@ use your own font.
 
 ## Status
 
-The V3 PCB has been fabricated and the firmware runs on it. See the
+The V3 PCB has been fabricated. KYBER OS 2 builds and has been checked in the PC simulator,
+but hasn't been flashed to the board yet. See the
 [known issues](docs/hardware.md#known-issues) for hardware bugs.
+
+### TODO
+
+- [ ] Tune the swing thresholds in `config.h` once it has been swung around.
 
 ## License
 

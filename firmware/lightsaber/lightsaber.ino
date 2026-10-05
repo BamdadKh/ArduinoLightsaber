@@ -2,22 +2,22 @@
   KYBER OS 2 - Arduino Nano lightsaber firmware
 
   Hardware (V3 PCB): Nano, MPU-6050 (A4/A5), DFPlayer Mini (D10/D11), 144 x WS2812B (D6),
-  main button D2, aux button D3, 128x32 SSD1306 on D8/D9 mounted portrait, battery on A7.
+  main button D2, aux button D3, 128x32 SSD1306 on D8/D9 mounted portrait. The cell feeds
+  the 5V pin directly; its voltage is read as Vcc.
 
   Module map
-    saber.cpp    modes, controls, gestures -> effects (the brain)
-    imu.cpp      MPU-6050: swing / clash / stab / twist / pitch
-    blade.cpp    LED styles, ignitions, effect overlays
+    saber.cpp    modes and controls -> effects (the brain)
+    imu.cpp      MPU-6050: swing and clash
+    blade.cpp    LED blade look, ignition, effect overlays
     ui.cpp       portrait OLED screens, streamed as scanlines (no framebuffer)
     audio.cpp    DFPlayer: looping hum + advert overlays, TX-only bit-bang serial
     buttons.cpp  two buttons: clicks, holds, chords
-    power.cpp    battery voltage against the internal bandgap
-    settings.cpp EEPROM settings, presets, lifetime stats
+    power.cpp    battery voltage (Vcc against the internal bandgap)
+    settings.cpp EEPROM settings and the colour table
 
   Every loop() pass does a slice of everything; nothing blocks for more than one
   LED frame (~4.5 ms) or one DFPlayer command (~10 ms).
 */
-#include <avr/sleep.h>
 #include "config.h"
 #include "state.h"
 #include "settings.h"
@@ -33,7 +33,7 @@
 #if DEBUG_SERIAL
 // Telemetry to the USB serial port (115200 8N1) without HardwareSerial's ~1.7 KB:
 // a TX-only bit-bang on D1, one line every 250 ms:
-// L loops/s, M mode, S swing dps, R roll dps, P pitch deg, G shock x0.1 g, B battery mV
+// L loops/s, M mode, S swing dps, B battery mV (rested cell; see power.cpp)
 #define DBG_BIT (F_CPU / 115200)
 static void dbgByte(uint8_t b) {
   uint8_t sreg = SREG;
@@ -74,9 +74,6 @@ static void debugPrint(uint32_t now) {
   dbgNum(PSTR("L="), loops * 4);
   dbgNum(PSTR("M="), sys.mode);
   dbgNum(PSTR("S="), motion.swingDps);
-  dbgNum(PSTR("R="), motion.rollDps);
-  dbgNum(PSTR("P="), motion.pitch);
-  dbgNum(PSTR("G="), motion.shock);
   dbgNum(PSTR("B="), sys.battMv);
   dbgByte(13); // CR LF
   dbgByte(10);
@@ -107,12 +104,7 @@ void loop() {
   sys.now = now;
   buttonsUpdate(now);
 
-  static uint32_t lastImu;
-  bool asleep = sys.mode == MODE_SLEEP;
-  if (sys.imuOk && (!asleep || now - lastImu >= 40)) {
-    imuUpdate(now);
-    lastImu = now;
-  }
+  if (sys.imuOk) imuUpdate(now);
 
   saberUpdate(now);
   audioUpdate(now);
@@ -124,10 +116,4 @@ void loop() {
 #if DEBUG_SERIAL
   debugPrint(now);
 #endif
-
-  if (asleep) {
-    // idle until the next timer tick; the millis() interrupt wakes us every ms
-    set_sleep_mode(SLEEP_MODE_IDLE);
-    sleep_mode();
-  }
 }
