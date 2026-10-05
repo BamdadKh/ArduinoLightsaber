@@ -1,4 +1,4 @@
-# Arduino Lightsaber ⚔️
+# Arduino Lightsaber
 
 A motion-reactive lightsaber built around an Arduino Nano on a custom PCB. It has a
 144-LED WS2812B blade, sound from a DFPlayer Mini, swing detection with an MPU-6050,
