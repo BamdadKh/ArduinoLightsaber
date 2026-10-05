@@ -1,4 +1,4 @@
-// MPU-6050 motion engine: raw sensor -> blade-frame quantities -> gesture events.
+// MPU-6050 motion engine: raw sensor readings to swing events.
 #pragma once
 #include <stdint.h>
 

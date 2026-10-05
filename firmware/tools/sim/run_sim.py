@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Build the PC simulator with MSVC, run it, and turn its dumps into preview PNGs.
 
-  python firmware/tools/sim/run_sim.py      -> firmware/tools/out/*.png
+  python firmware/tools/sim/run_sim.py   (writes firmware/tools/out/*.png)
 
 The simulator compiles the real ui.cpp / blade.cpp / settings.cpp, so what you see
 is what the saber's OLED and LED strip render.

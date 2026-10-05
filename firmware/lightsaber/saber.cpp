@@ -208,7 +208,7 @@ static void onButton(uint32_t now, const ButtonEvent& e) {
   }
 }
 
-static void onMotion(uint32_t now, uint8_t ev) {
+static void onMotion(uint8_t ev) {
   if ((ev & IMU_SWING) && bladeSettled() && !sys.lockup) {
     audioAdvertRandom(motion.swingPeak > SWING_FAST_DPS ? ADV_SWING_FAST : ADV_SWING_SLOW, 4);
   }
@@ -251,7 +251,6 @@ void saberUpdate(uint32_t now) {
   // ---- buttons
   ButtonEvent e;
   while (buttonsGet(e)) {
-    if (e.type == BE_PRESS || e.type == BE_LONG || e.type == BE_CHORD) continue;
     switch (sys.mode) {
       case MODE_OFF: offButton(now, e); break;
       case MODE_ON: onButton(now, e); break;
@@ -261,7 +260,7 @@ void saberUpdate(uint32_t now) {
 
   // ---- motion and timers
   if (isOn()) {
-    onMotion(now, ev);
+    onMotion(ev);
     uint32_t last = motion.lastMotion > lastInput ? motion.lastMotion : lastInput;
     if (now - last > IDLE_OFF_MS) retract(now);
   } else if (sys.mode == MODE_MENU && now - lastInput > MENU_TIMEOUT_MS) {

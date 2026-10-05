@@ -1,75 +1,54 @@
-# SD card (sound font)
+# SD card
 
-Copy the two folders here, `MP3/` and `ADVERT/`, to the root of a FAT32 micro-SD card.
-The DFPlayer finds files in these folders **by their number**, so copy order doesn't matter.
+`MP3/` and `ADVERT/` go in the root of a FAT32 micro-SD card. The DFPlayer finds files in these
+folders by number, so copy order doesn't matter. `build_sd_card.py` fills both (see the main
+README); the files are committed so a clone is ready to copy.
 
 ```
-SD root
-├── MP3/       main channel: hum loop, ignite, retract, lockup loops, UI sounds
-└── ADVERT/    overlays: swings, clashes, blasters... played on top of the hum
+MP3/      main channel: hum loop, ignite, retract, lockup loop, menu sounds
+ADVERT/   short sounds played over the hum: swings, clashes, blaster blocks
 ```
 
-The firmware loops the hum on the main channel. Every short effect is a DFPlayer
-*advert*, which pauses the hum, plays, then lets the hum carry on. That's how one
-decoder does layered sound without the BUSY pin.
+The hum loops on the main channel. Every short effect is a DFPlayer advert, which pauses the
+hum, plays, and lets it carry on. That is how one decoder layers sound without a BUSY pin.
 
-**Where the sounds come from.** The blade sounds (hum, ignite, retract, lockup, swings, clashes,
-blaster blocks) are real saber sounds from the *TeensySF* font in the ProffieOS default SD card,
-by Fredrik Hubinette, licensed [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/).
-Menu, boot and other UI sounds are synthesized (original). To rebuild the card contents:
+The blade sounds are from the TeensySF font in the ProffieOS default SD card, by Fredrik
+Hubinette, [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/). The menu and boot
+sounds are synthesized by `make_ui_sounds.py`.
 
-```bash
-python firmware/tools/make_sounds.py        # synthesized UI sounds (+ placeholders)
-python firmware/tools/get_saber_sounds.py   # real blade sounds over the top, updates sound_lengths.h
-```
+## Tracks
 
-The second script downloads the ~200 MB ProffieOS zip once (cached in `firmware/tools/out/`).
-Tracks the firmware no longer uses (drag, melt, lightning, stab, force, training...) are harmless leftovers.
-
-## Track map
-
-### `MP3/` (main channel)
+`MP3/`
 
 | File | Sound | Notes |
 |------|-------|-------|
-| `0001` | Boot chime | Plays once the self-test finds the player |
-| `0002` | **Hum** | Looped. Make it long (8 s here) so the loop restarts rarely |
-| `0003` | Ignite | One-shot, then the hum starts. Length in `sound_lengths.h` |
-| `0004` | Retract | One-shot. Length in `sound_lengths.h` |
-| `0005` | Lockup | Looped while AUX is held |
-| `0006` | Drag | Looped (lockup with the tip pointing down) |
-| `0007` | Melt | Looped (stab during a lockup) |
-| `0008` | Lightning block | Looped while MAIN is held |
-| `0009` | UI tick | Menu navigation (blade off) |
-| `0010` | UI confirm | |
-| `0011` | UI back | |
-| `0012` | Low battery | |
-| `0013` | Power down | |
+| 0001 | boot chime | plays once at power-up |
+| 0002 | hum | looped |
+| 0003 | ignite | plays once, then the hum starts |
+| 0004 | retract | plays once |
+| 0005 | lockup | looped while AUX is held |
+| 0006 | menu tick | |
+| 0007 | menu confirm | |
+| 0008 | menu back | |
+| 0009 | low battery | |
 
-### `ADVERT/` (effects over the hum)
+`ADVERT/`
 
 | Files | Sound |
 |-------|-------|
-| `0001`–`0004` | Slow swings (picked at random, never the same twice) |
-| `0005`–`0008` | Fast swings (peak above `SWING_FAST_DPS`) |
-| `0009`–`0012` | Clashes |
-| `0013`–`0016` | Blaster deflects |
-| `0017` | Stab |
-| `0018` | Force push |
-| `0019` | Tick (colour wheel, menu while lit) |
-| `0020` | Training droid fires |
-| `0021` | Training: you got hit |
-| `0022` | Training: game over |
-| `0023` | Preset change |
-| `0024` | Confirm |
+| 0001-0004 | slow swings, picked at random, never the same twice in a row |
+| 0005-0008 | fast swings (peak above `SWING_FAST_DPS`) |
+| 0009-0012 | clashes, played when a lockup ends |
+| 0013-0016 | blaster blocks |
+| 0017 | menu tick while the blade is lit |
+| 0018 | colour change |
 
-## Using your own font
+## Using your own sounds
 
-- WAV and MP3 both work: mono, 16-bit, 22.05–44.1 kHz. Keep the 4-digit number and
-  the extension, e.g. `0002.mp3`. If a DFPlayer clone refuses WAV, convert to MP3 with:
-  `ffmpeg -i 0002.wav -q:a 2 0002.mp3`
-- Loops (hum, lockup, drag, melt, lightning) should be cut on a zero crossing so they
-  repeat without a click. MP3 encoders add a few ms of padding, so WAV loops are cleaner.
-- The firmware can't hear when a one-shot ends, because BUSY isn't wired and serial RX
-  is off while the blade runs. Put your ignite and retract lengths in
-  `firmware/lightsaber/sound_lengths.h`, otherwise the hum starts early or late.
+- WAV or MP3, mono, 16-bit, 22.05 to 44.1 kHz. Keep the four-digit number and the extension. If
+  a DFPlayer clone refuses WAV, convert with `ffmpeg -i 0002.wav -q:a 2 0002.mp3`.
+- Loops (hum, lockup) should be cut at a zero crossing so they repeat without a click. MP3
+  encoders add a few milliseconds of padding, so WAV loops are cleaner.
+- Without a BUSY pin the firmware can't hear when a sound ends. It stops each one-shot by its
+  length, which lives in `firmware/lightsaber/sound_lengths.h` (written by `build_sd_card.py`).
+  Trim silence off the end of one-shots, or the hum will start late.

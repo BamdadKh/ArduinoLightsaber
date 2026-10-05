@@ -19,7 +19,7 @@ static inline uint8_t lerp8(uint8_t a, uint8_t b, uint8_t t) {
 // Smooth value noise over x with time t (both 8.8 fixed point lattice), 0..255.
 uint8_t vnoise(uint16_t x, uint16_t t);
 
-// Sine: phase 0..255 in, 0..255 out (phase 0 -> 128, rising)
+// Sine: phase 0..255 in, 0..255 out (phase 0 gives 128, rising)
 uint8_t tsin8(uint8_t p);
 
 // Small fast PRNG (xorshift)

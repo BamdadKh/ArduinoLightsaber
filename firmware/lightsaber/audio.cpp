@@ -2,8 +2,8 @@
 #include "config.h"
 #include "mathx.h"
 
-#define TX_BIT _BV(3) // D11 = PB3 -> DFPlayer RX
-#define RX_BIT _BV(2) // D10 = PB2 <- DFPlayer TX
+#define TX_BIT _BV(3) // D11 = PB3, to DFPlayer RX
+#define RX_BIT _BV(2) // D10 = PB2, from DFPlayer TX
 #define BIT_CYCLES (F_CPU / 9600)
 // A one-shot starts ~150 ms after audioPlay() (loop-off and play commands go out first), so the
 // stop lands just after its faded tail. Any later and the player restarts the clip for a moment.
@@ -165,7 +165,6 @@ void audioStop() {
 
 void audioSetVolume(uint8_t v) { baseVol = v > 30 ? 30 : v; }
 void audioMute(bool m) { muted = m; }
-bool audioBusy() { return qLen || pendingAdvert || loopNext; }
 
 void audioUpdate(uint32_t now) {
   if (loopNext && (int32_t)(now - loopAt) >= 0) {

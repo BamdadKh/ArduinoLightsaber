@@ -7,9 +7,9 @@
 #define PIN_BTN_AUX  3   // J4, INT1
 #define PIN_LED      6   // J1 WS2812B data
 // Fixed by the drivers (direct port access, change there too if you move them):
-//   OLED  SDA = D8 (PB0), SCL = D9 (PB1)          -> oled.cpp
-//   DFPlayer  RX <- D11 (PB3), TX -> D10 (PB2)     -> audio.cpp
-//   MPU-6050 on hardware I2C A4/A5                 -> twi.cpp
+//   OLED  SDA = D8 (PB0), SCL = D9 (PB1)          (oled.cpp)
+//   DFPlayer  RX on D11 (PB3), TX on D10 (PB2)     (audio.cpp)
+//   MPU-6050 on hardware I2C A4/A5                 (twi.cpp)
 
 // ---------------------------------------------------------------- blade
 #define NUM_LEDS        144   // must stay <= 255 (uint8_t indices)
@@ -43,7 +43,7 @@
 #define MOTION_DPS        18   // anything above is "the saber is being handled"
 
 // ---------------------------------------------------------------- timing
-#define IDLE_OFF_MS       (5UL * 60 * 1000) // blade on but untouched -> auto retract
+#define IDLE_OFF_MS       (5UL * 60 * 1000) // blade on but untouched: auto retract
 #define MENU_TIMEOUT_MS   30000
 #define SETTINGS_SAVE_MS  2500             // EEPROM write is deferred this long after a change
 

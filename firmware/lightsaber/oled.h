@@ -10,7 +10,6 @@
 
 void oledInit(bool flip);
 void oledFlip(bool flip);
-void oledPower(bool on);
 void oledInvert(bool on);
 void oledContrast(uint8_t c);
 void oledWindowAll();          // rewind the write pointer to the top of the screen

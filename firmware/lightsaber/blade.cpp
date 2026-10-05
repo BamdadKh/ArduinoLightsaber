@@ -11,7 +11,6 @@ enum Phase : uint8_t { PH_OFF, PH_IGNITE, PH_ON, PH_RETRACT };
 static uint8_t phase;
 static uint32_t phaseAt;
 static uint16_t phaseDur;
-static bool preview;
 static bool dark = true;
 static uint32_t lastFrame;
 static uint16_t flowT;   // animation clock; runs faster while the blade is swung
@@ -36,7 +35,6 @@ static NOINLINE void blendC(CRGB& c, uint8_t r, uint8_t g, uint8_t b, uint8_t a)
   c.g = lerp8(c.g, g, a);
   c.b = lerp8(c.b, b, a);
 }
-static void blendC(CRGB& c, const CRGB& t, uint8_t a) { blendC(c, t.r, t.g, t.b, a); }
 static inline uint8_t easeOut(uint8_t p) { return 255 - (((uint16_t)(255 - p) * (255 - p)) >> 8); }
 static inline uint8_t easeIn(uint8_t p) { return ((uint16_t)p * p) >> 8; }
 static inline uint8_t dist8(uint8_t a, uint8_t b) { return a > b ? a - b : b - a; }
@@ -65,7 +63,6 @@ void bladeIgnite(uint32_t now, bool quick) {
   phaseDur = quick ? IGNITE_MS / 2 : IGNITE_MS;
   phaseAt = now;
   phase = PH_IGNITE;
-  preview = false;
 }
 
 void bladeRetract(uint32_t now) {
@@ -75,9 +72,7 @@ void bladeRetract(uint32_t now) {
   phase = PH_RETRACT;
 }
 
-bool bladeLit() { return phase != PH_OFF; }
 bool bladeSettled() { return phase == PH_ON || phase == PH_OFF; }
-void bladePreview(bool on) { preview = on; }
 
 void bladeClash(uint32_t now) {
   sys.clashAt = now;
@@ -107,7 +102,7 @@ bool bladeRender(uint32_t now) {
     }
   }
 
-  if (phase == PH_OFF && !preview) {
+  if (phase == PH_OFF) {
     sys.ext = 0;
     if (dark) return false;
     for (uint8_t i = 0; i < N; i++) leds[i] = CRGB(0, 0, 0);
@@ -139,8 +134,7 @@ bool bladeRender(uint32_t now) {
   uint8_t sat = presetSat(pi);
   uint8_t hue = presetHue(pi);
   CRGB c1 = hsv(hue, sat, 255);
-  uint8_t breathe = tsin8((uint8_t)(t >> 4)) >> 4;                    // 0-15, slow
-  breathe += (vnoise(0, t >> 1) >> 5);                                // plus a little drift
+  uint8_t breathe = (tsin8((uint8_t)(t >> 4)) >> 4) + (vnoise(0, t >> 1) >> 5);  // slow, 0-22
 
   uint16_t aClash = ageOf(now, sys.clashAt), aBlast = ageOf(now, sys.blastAt);
   bool fxClash = sys.clashAt && aClash < 240;
@@ -165,9 +159,8 @@ bool bladeRender(uint32_t now) {
       continue;
     }
 
-    // ---- base look: fully saturated colour at full power, with a slow shimmer along the blade
-    // and gentle whole-blade breathing, like a real plasma blade. No hard flicker. The dips are
-    // shallow on purpose: an LED blade has no headroom above full, so it must live near it.
+    // ---- base colour: full saturation, slow shimmer along the blade, slight breathing overall.
+    // The dips stay shallow because an LED can't go above full, so the blade sits just below it.
     CRGB c = c1;
     scaleC(c, 238 + (vnoise((uint16_t)(i * 24), t) >> 5) + (breathe >> 1));
 

@@ -1,22 +1,22 @@
 /*
-  KYBER OS 2 - Arduino Nano lightsaber firmware
+  Arduino Nano lightsaber firmware
 
   Hardware (V3 PCB): Nano, MPU-6050 (A4/A5), DFPlayer Mini (D10/D11), 144 x WS2812B (D6),
   main button D2, aux button D3, 128x32 SSD1306 on D8/D9 mounted portrait. The cell feeds
   the 5V pin directly; its voltage is read as Vcc.
 
   Module map
-    saber.cpp    modes and controls -> effects (the brain)
-    imu.cpp      MPU-6050: swing and clash
+    saber.cpp    modes and controls
+    imu.cpp      MPU-6050: swing detection
     blade.cpp    LED blade look, ignition, effect overlays
     ui.cpp       portrait OLED screens, streamed as scanlines (no framebuffer)
     audio.cpp    DFPlayer: looping hum + advert overlays, TX-only bit-bang serial
-    buttons.cpp  two buttons: clicks, holds, chords
+    buttons.cpp  two buttons: clicks and holds
     power.cpp    battery voltage (Vcc against the internal bandgap)
     settings.cpp EEPROM settings and the colour table
 
-  Every loop() pass does a slice of everything; nothing blocks for more than one
-  LED frame (~4.5 ms) or one DFPlayer command (~10 ms).
+  Every loop() pass does a slice of each job. Nothing blocks for longer than one LED
+  frame (~4.5 ms) or one DFPlayer command (~10 ms).
 */
 #include "config.h"
 #include "state.h"

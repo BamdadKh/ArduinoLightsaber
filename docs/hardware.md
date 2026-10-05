@@ -1,8 +1,8 @@
 # Hardware
 
-> **Source of truth:** the fabricated V3 PCB (`hardware/fabrication/lightsaber-v3-gerbers.zip`)
-> and the firmware. The KiCad schematic has known mistakes that were worked around
-> in code after the boards were ordered — do not trust it over the board.
+The fabricated V3 PCB (`hardware/fabrication/lightsaber-v3-gerbers.zip`) and the firmware are
+the source of truth. The KiCad schematic has mistakes that were worked around in code after the
+boards were ordered, so don't trust it over the board.
 
 ## Bill of materials
 
@@ -14,27 +14,27 @@
 | J1 | WS2812B strip, 144 LEDs | 3-pin header: GND / data / 5V |
 | J2 | Momentary push button (main) | To GND, internal pull-up |
 | J4 | Momentary push button (aux) | To GND, internal pull-up |
-| J3 | **SSD1306 OLED** (as built) | The schematic calls this header Bluetooth (D8/D9), but the OLED is wired here and runs on software I²C. SDA → D8 (white), SCL → D9 (yellow) |
+| J3 | **SSD1306 OLED** (as built) | The schematic calls this header Bluetooth (D8/D9), but the OLED is wired here and runs on software I²C. SDA to D8 (white), SCL to D9 (yellow) |
 | J5 | Intended for the OLED (I²C on A4/A5) | Unused as built |
-| J7 | Speaker/amp header | DFPlayer `DAC_R` + 5V + GND → external amp |
+| J7 | Speaker/amp header | DFPlayer `DAC_R`, 5V and GND, to an external amp |
 | J6 | 5V / GND power in | |
-| J8 | Battery sense | **Not routed on the PCB** — see known issues |
-| — | 4× M2 mounting holes | 2.2 mm |
+| J8 | Battery sense | Not routed on the PCB, and not needed (see known issues) |
+|  | 4× M2 mounting holes | 2.2 mm |
 
 ## Pin map (as built)
 
-| Nano pin | Net | Connected to | Used in firmware |
+| Nano pin | Net | Connected to | Firmware |
 |----------|-----|--------------|------------------|
-| D2  | `d2`  | J2 main button | ✅ `PIN_BTN_MAIN` |
-| D3  | `d3`  | J4 aux button | ✅ `PIN_BTN_AUX` |
-| D6  | `d6`  | J1 WS2812B data | ✅ `PIN_LED` |
-| D8  | `d8`  | J3 → OLED SDA (white) | ✅ software I²C (`oled.cpp`, PB0) |
-| D9  | `d9`  | J3 → OLED SCL (yellow) | ✅ software I²C (`oled.cpp`, PB1) |
-| D10 | —     | DFPlayer TX | ✅ polled once at boot to detect the player (`audio.cpp`, PB2) |
-| D11 | —     | DFPlayer RX | ✅ bit-banged 9600 baud TX (`audio.cpp`, PB3) |
-| A4  | `sda` | MPU-6050 (+ J5, unused) | ✅ I²C |
-| A5  | `scl` | MPU-6050 (+ J5, unused) | ✅ I²C |
-| A7  | `a7`  | J8 battery (bodge wire, see below) | ✅ `PIN_BATTERY` |
+| D2  | `d2`  | J2 main button | `PIN_BTN_MAIN` |
+| D3  | `d3`  | J4 aux button | `PIN_BTN_AUX` |
+| D6  | `d6`  | J1 WS2812B data | `PIN_LED` |
+| D8  | `d8`  | J3, OLED SDA (white) | software I²C (`oled.cpp`, PB0) |
+| D9  | `d9`  | J3, OLED SCL (yellow) | software I²C (`oled.cpp`, PB1) |
+| D10 |       | DFPlayer TX | polled once at boot to detect the player (`audio.cpp`, PB2) |
+| D11 |       | DFPlayer RX | bit-banged 9600 baud TX (`audio.cpp`, PB3) |
+| A4  | `sda` | MPU-6050 (+ J5, unused) | I²C |
+| A5  | `scl` | MPU-6050 (+ J5, unused) | I²C |
+| A7  | `a7`  | J8 battery sense | unused |
 
 ## Known issues
 
@@ -52,9 +52,9 @@ Board issues:
   +-10 %: check the menu > BATTERY millivolts against a multimeter once and scale
   `BANDGAP_MV` in `config.h` if they differ. The percentage and low-battery warning use the
   cell's *resting* voltage (blade off); the lit-blade sag is ignored except as a brown-out guard.
-- **DFPlayer BUSY (pin 16) is not connected.** The firmware is designed around this: the hum
-  is looped by the player itself, effects are "adverts" that resume it, and one-shot lengths
-  come from `sound_lengths.h`.
+- **DFPlayer BUSY (pin 16) is not connected.** The firmware is built around this: the hum is
+  looped by the player itself, effects are "adverts" that resume it, and one-shot lengths come
+  from `sound_lengths.h`.
 - **The DFPlayer's built-in amp is unused.** SPK1/SPK2 aren't connected. Audio leaves through
   `DAC_R` (right channel only) on J7, so an external amplifier is required.
 - **No 1 kΩ series resistor** between Nano TX and DFPlayer RX. DFRobot recommends one to reduce noise and hiss.
@@ -64,14 +64,14 @@ Board issues:
   strip's power, since the strip can pull several amps.
 - **The OLED is on D8/D9, not the hardware I²C bus.** It's wired to J3, the header the schematic
   labels for Bluetooth, so it has to run on software I²C and can't share the MPU-6050's A4/A5 bus.
-  Wire it as OLED SDA → D8, SCL → D9. Go by the pin labels on the OLED, not the wire colours.
+  Wire OLED SDA to D8 and SCL to D9. Go by the pin labels on the OLED, not the wire colours.
 - **The power system isn't in the schematic or PCB.** The board only has a `5V/G` input (J6) and a
   `bat+` pad (J8). The battery, charging, switch and 5V regulation all live off the board and
-  aren't documented yet (TODO).
+  aren't documented here.
 - **No LED current limit in hardware.** 144 WS2812B LEDs at full white draw about 8.6 A.
-  The firmware estimates each frame's current and scales it to `LED_MAX_MA` (2.2 A default,
-  set it to what your boost converter can deliver). Even when dark, the strip idles at roughly
-  1 mA per LED, so sleep mode doesn't stop that drain. Use the hilt's power switch for storage.
+  The firmware estimates each frame's current and scales it down to `LED_MAX_MA` (3.2 A by default;
+  set it to what your cell can deliver). Even when dark the strip idles at roughly 1 mA per LED,
+  so use the hilt's power switch for storage.
 - DRC on the PCB file reports 47 violations: 25 isolated copper, 7 clearance, 7 courtyard overlap, and minor silk issues.
 - `fp-lib-table` points to a `DFR0299.pretty` in the author's Downloads folder, which no longer exists.
   The board still opens because its footprints are stored inside the `.kicad_pcb`.
@@ -97,11 +97,11 @@ off-board modules stack below it. Components placed in the assembly:
 | Flat speaker (35×25) | |
 | 2× tactile push button (B3F) | Main (J2) and aux (J4) buttons |
 | OLED 0.91" SSD1306 128×32 | Status display on J3, mounted along the hilt |
-| HC-06 Bluetooth module | Placeholder; Bluetooth is shelved and J3 is used by the OLED |
+| HC-06 Bluetooth module | Placeholder. Bluetooth is shelved and J3 is used by the OLED |
 
-To update the model, export a fresh `.f3z` from Fusion (**File → Export → Fusion Archive**) over
+To update the model, export a fresh `.f3z` from Fusion (File > Export > Fusion Archive) over
 the existing file. Use `.f3z` rather than `.f3d` so the linked component models come along.
-Re-export the tube with right-click on the body → **Save As Mesh → STL** to `hilt-tube.stl`.
+Re-export the tube with right-click on the body > Save As Mesh > STL to `hilt-tube.stl`.
 
 ## Regenerating exports
 
@@ -114,4 +114,4 @@ kicad-cli pcb export svg --layers F.Cu,F.Silkscreen,Edge.Cuts --page-size-mode 2
 kicad-cli pcb export svg --layers B.Cu,B.Silkscreen,Edge.Cuts --mirror --page-size-mode 2 --exclude-drawing-sheet -o hardware/exports/lightsaber-pcb-back.svg hardware/kicad/lightsaber.kicad_pcb
 ```
 
-Do **not** regenerate `lightsaber-v3-gerbers.zip` — it is the exact file sent to the fab.
+Don't regenerate `lightsaber-v3-gerbers.zip`. It is the exact file sent to the fab.

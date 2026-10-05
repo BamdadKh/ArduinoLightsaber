@@ -10,11 +10,9 @@ extern CRGB leds[NUM_LEDS];
 void bladeInit();
 void bladeIgnite(uint32_t now, bool quick = false);
 void bladeRetract(uint32_t now);
-bool bladeLit();        // any part extended or animating
 bool bladeSettled();    // fully on or fully off, no ignition/retraction running
 void bladeClash(uint32_t now);
 void bladeBlast(uint32_t now, uint8_t pos);
-void bladePreview(bool on);                  // menu: show the colour while the saber is off
 void bladeSetBrightness(uint8_t level);      // 1-10
 uint8_t bladeBrightness();                   // 0-255 for ledShow()
 // Render one frame into leds[]. Returns false if nothing changed (strip already dark).

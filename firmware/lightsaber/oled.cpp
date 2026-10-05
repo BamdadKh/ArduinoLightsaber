@@ -93,7 +93,6 @@ void oledFlip(bool flip) {
   cmds(c, 2);
 }
 
-void oledPower(bool on) { cmd1(on ? 0xAF : 0xAE); }
 void oledInvert(bool on) { cmd1(on ? 0xA7 : 0xA6); }
 
 void oledContrast(uint8_t c) {

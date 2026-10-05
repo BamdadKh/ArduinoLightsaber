@@ -11,20 +11,18 @@
 #pragma once
 #include <stdint.h>
 
-// /MP3/000N.wav|mp3 - main channel
+// /MP3/000N.wav - main channel
 enum : uint8_t {
-  SND_BOOT = 1, SND_HUM, SND_IGNITE, SND_RETRACT,
-  SND_LOCKUP, SND_DRAG, SND_MELT, SND_LIGHTNING,
-  SND_UI_TICK, SND_UI_OK, SND_UI_BACK, SND_LOWBATT, SND_SLEEP,
+  SND_BOOT = 1, SND_HUM, SND_IGNITE, SND_RETRACT, SND_LOCKUP,
+  SND_UI_TICK, SND_UI_OK, SND_UI_BACK, SND_LOWBATT,
 };
-// /ADVERT/000N.wav|mp3 - overlays while something is playing
+// /ADVERT/000N.wav - overlays while something is playing
 enum : uint8_t {
   ADV_SWING_SLOW = 1,  // 1-4
   ADV_SWING_FAST = 5,  // 5-8
   ADV_CLASH = 9,       // 9-12
   ADV_BLASTER = 13,    // 13-16
-  ADV_STAB = 17, ADV_FORCE, ADV_TICK, ADV_TRAIN_SHOT, ADV_TRAIN_HIT,
-  ADV_TRAIN_OVER, ADV_PRESET, ADV_OK,
+  ADV_TICK = 17, ADV_PRESET,
 };
 
 enum AudioStatus : uint8_t { AUDIO_UNKNOWN, AUDIO_OK, AUDIO_NO_CARD, AUDIO_NO_MODULE };
@@ -37,8 +35,7 @@ void audioSetVolume(uint8_t v);           // 0-30, persistent level
 void audioMute(bool m);
 void audioPlay(uint8_t track);            // one-shot on the main channel
 void audioLoop(uint8_t track);            // looping on the main channel
-void audioPlayThenLoop(uint8_t track, uint16_t ms, uint8_t loopTrack); // e.g. ignite -> hum
+void audioPlayThenLoop(uint8_t track, uint16_t ms, uint8_t loopTrack); // e.g. ignite, then hum
 void audioAdvert(uint8_t track);          // effect overlay (latest request wins)
 void audioAdvertRandom(uint8_t first, uint8_t count);
 void audioStop();
-bool audioBusy();                         // commands still queued

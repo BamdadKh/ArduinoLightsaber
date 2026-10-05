@@ -29,7 +29,7 @@ static const char MENU_TITLES[MI_COUNT][10] PROGMEM = {
   "SOUND", "LIGHT", "COLOR", "SENS", "FLIP", "CALIBRATE", "BATTERY", "EXIT",
 };
 static const uint8_t MENU_ICONS[MI_COUNT] PROGMEM = {
-  ICON_VOLUME, ICON_BRIGHT, ICON_COLOR, ICON_SWING, ICON_FLIP, ICON_CALIB, ICON_STATS, ICON_EXIT,
+  ICON_VOLUME, ICON_BRIGHT, ICON_COLOR, ICON_SWING, ICON_FLIP, ICON_CALIB, ICON_BATTERY, ICON_EXIT,
 };
 static const char S_NORMAL[] PROGMEM = "UP";
 static const char S_FLIPPED[] PROGMEM = "DOWN";
@@ -40,7 +40,7 @@ static const char S_MSET[] PROGMEM = "M:SET";
 static const char S_MGO[] PROGMEM = "M:GO";
 static const char S_ANXT[] PROGMEM = "A:NXT";
 static const char S_KYBER[] PROGMEM = "KYBER";
-static const char S_OS[] PROGMEM = "OS2.0";
+static const char S_OS[] PROGMEM = "V3";
 static const char S_DIAG[3][4] PROGMEM = {"IMU", "SND", "SD"};
 
 // Fixed labels per screen: {screen, y, text}
@@ -61,7 +61,7 @@ static const uint8_t CROSS[5] PROGMEM = {0x88, 0x50, 0x20, 0x50, 0x88};
 // Per-frame text: centred (or marquee) strings, from flash or built in RAM.
 struct Txt {
   uint8_t y, scale;
-  const char* p;   // flash string, or null -> buf
+  const char* p;   // flash string, or null to use buf
   char buf[12];
 };
 #define MAX_TXT 8
@@ -180,7 +180,7 @@ static Row saberIdle(uint8_t y) {
     if (a <= 3) r |= span(mx - (3 - a) / 2, mx + (3 - a) / 2);
     if (a == 3) r |= pix(0) | pix(31);
   }
-  // a faint ghost of the blade, breathing
+  // dim outline of the blade
   if (y >= 74 && y <= SABER_BOT) r |= dither(1 + (tsin8((uint8_t)(fa >> 4)) >> 6) + (y > 82 ? 2 : 0), y) & span(14, 17);
   return r;
 }
@@ -190,7 +190,7 @@ static Row rowSaber(uint8_t y) {
   if (y >= HILT_Y) {
     Row r = bmpRow(HILT_BMP, 2, HILT_W, HILT_H, 10, HILT_Y, y);
     if (y == HILT_Y + HILT_CRYSTAL_ROW + 1) {
-      // kyber crystal: slow heartbeat when off, alive and flickering when lit
+      // crystal in the hilt: pulses when off, flickers when lit
       bool lit = sys.ext ? (motion.swing < 40 || (fN & 1)) : tsin8((uint8_t)(fa >> 3)) > 170;
       if (lit) r |= span(15, 16);
     }
@@ -220,7 +220,7 @@ static Row rowMenu(uint8_t y) {
 static Row rowBoot(uint8_t y) {
   uint16_t t = fT - sys.bootAt;
   Row r = 0;
-  if (t < 256 && y == t >> 1) return 0xFFFFFFFFUL; // CRT-style power-on sweep
+  if (t < 256 && y == t >> 1) return 0xFFFFFFFFUL; // power-on scanline
   for (uint8_t k = 0; k < 3; k++) {
     uint8_t y0 = 28 + k * 10;
     if (t < 700u + k * 160u || y < y0 || y >= y0 + 7) continue;

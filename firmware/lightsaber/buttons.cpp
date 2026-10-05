@@ -5,11 +5,10 @@
 #define DEBOUNCE_MS 8
 #define MULTI_MS 300
 #define HOLD_MS 450
-#define LONG_MS 1500
 
 struct Btn {
   uint8_t pin;
-  bool raw, down, held, longed, multi, chorded;
+  bool raw, down, held, ignore, multi;
   uint8_t clicks;
   uint16_t rawSince, pressAt, releaseAt; // 16-bit ms: only short intervals are measured
 };
@@ -36,21 +35,12 @@ void buttonsInit() {
 
 void buttonMulti(uint8_t b, bool on) { btns[b].multi = on; }
 
-// Drop pending events and swallow the release of anything still held
-// (so the press that wakes the saber doesn't also ignite it).
 void buttonsFlush() {
   evLen = 0;
   for (uint8_t i = 0; i < 2; i++) {
     btns[i].clicks = 0;
-    if (btns[i].down) btns[i].chorded = true;
+    if (btns[i].down) btns[i].ignore = true; // swallow its release
   }
-}
-
-bool buttonDown(uint8_t b) { return btns[b].down; }
-
-uint16_t buttonHeldMs(uint8_t b, uint32_t now) {
-  if (!btns[b].down) return 0;
-  return (uint16_t)now - btns[b].pressAt;
 }
 
 bool buttonsGet(ButtonEvent& e) {
@@ -65,7 +55,6 @@ void buttonsUpdate(uint32_t now32) {
   uint16_t now = now32;
   for (uint8_t i = 0; i < 2; i++) {
     Btn& b = btns[i];
-    Btn& o = btns[i ^ 1];
     bool raw = !digitalRead(b.pin);
     if (raw != b.raw) {
       b.raw = raw;
@@ -74,39 +63,22 @@ void buttonsUpdate(uint32_t now32) {
       b.down = raw;
       if (raw) {
         b.pressAt = now;
-        b.held = b.longed = false;
-        emit(i, BE_PRESS, 0);
-        if (o.down && !o.held && !o.chorded) {
-          b.chorded = o.chorded = true;
-          b.clicks = o.clicks = 0;
-          emit(i, BE_CHORD, 1);
-        }
+        b.held = false;
       } else {
         b.releaseAt = now;
-        if (b.chorded) {
-          // swallowed; cleared below once both are up
-        } else if (b.held) {
-          emit(i, BE_HOLD_END, 0);
-        } else if (!b.multi) {
-          emit(i, BE_CLICK, 1);
-        } else {
-          b.clicks++;
-        }
+        if (b.ignore) b.ignore = false;
+        else if (b.held) emit(i, BE_HOLD_END, 0);
+        else if (!b.multi) emit(i, BE_CLICK, 1);
+        else b.clicks++;
       }
     }
-    if (b.chorded && !b.down && !o.down) b.chorded = o.chorded = false;
-    if (b.chorded) continue;
+    if (b.ignore) continue;
 
     if (b.down) {
-      uint16_t d = now - b.pressAt;
-      if (!b.held && d >= HOLD_MS) {
+      if (!b.held && (uint16_t)(now - b.pressAt) >= HOLD_MS) {
         b.held = true;
         b.clicks = 0;
         emit(i, BE_HOLD, 1);
-      }
-      if (!b.longed && d >= LONG_MS) {
-        b.longed = true;
-        emit(i, BE_LONG, 1);
       }
     } else if (b.clicks && ((uint16_t)(now - b.releaseAt) >= MULTI_MS || b.clicks >= 3)) {
       emit(i, BE_CLICK, b.clicks);

@@ -12,7 +12,7 @@ static int32_t gravQ[3];      // low-passed accel, raw << 4 (tau ~120 ms)
 static int16_t lastRawGyro[3];
 static uint8_t stillCount;
 
-// sensitivity 1-9 -> threshold scale, x64 (5 = 1.0)
+// sensitivity 1-9, as a threshold scale, x64 (5 = 1.0)
 static const uint8_t SENS_K[10] PROGMEM = {128, 107, 91, 80, 71, 64, 58, 53, 49, 46};
 
 static bool readRaw(int16_t a[3], int16_t* temp, int16_t g[3]) {

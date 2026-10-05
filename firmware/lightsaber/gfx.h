@@ -31,7 +31,7 @@ static inline Row place(uint32_t bits, uint8_t w, int16_t x) {
   return sh >= 0 ? bits << sh : bits >> -sh;
 }
 
-// Double every bit: 0b101 -> 0b110011 (for 2x scaled glyphs and icons).
+// Double every bit: 0b101 becomes 0b110011 (for 2x scaled glyphs and icons).
 static inline uint16_t dbl8(uint8_t b) {
   uint16_t r = 0;
   for (uint8_t i = 0; i < 8; i++)

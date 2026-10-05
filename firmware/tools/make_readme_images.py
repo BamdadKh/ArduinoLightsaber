@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build docs/images/oled-screens.png and blade-effects.png from the simulator output.
+"""Build docs/images/screens.png and blade.png from the simulator output.
 
   python firmware/tools/sim/run_sim.py && python firmware/tools/make_readme_images.py
 """
@@ -50,12 +50,12 @@ def main():
     screens = [("boot", "boot_1850"), ("ready", "idle"), ("low battery", "idle_lowbatt"), ("lit", "on_still"),
                ("swing", "on_swing"), ("blaster", "on_blaster"), ("lockup", "on_lockup"), ("menu: sound", "menu_00"),
                ("menu: battery", "menu_06")]
-    sheet([(n, oled(f)) for n, f in screens], 9).save(DOCS / "oled-screens.png")
+    sheet([(n, oled(f)) for n, f in screens], 9).save(DOCS / "screens.png")
 
     tiles = [("ignite and retract", blade("ignite")), ("flash, blaster block, lockup", blade("effects"))]
     names = ["azure", "jade", "ruby", "amber", "iris", "ice"]
     tiles += [(f"{n}, with a swing in the middle", blade(f"look_{i}")) for i, n in enumerate(names)]
-    sheet(tiles, 2).save(DOCS / "blade-effects.png")
+    sheet(tiles, 2).save(DOCS / "blade.png")
 
 
 if __name__ == "__main__":
